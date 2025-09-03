@@ -1,0 +1,25 @@
+/* Auto-width columns for admin tables */
+#changelist table {
+    table-layout: auto !important;
+    width: auto !important;
+}
+
+#changelist table th,
+#changelist table td {
+    width: auto !important;
+    white-space: nowrap;
+}
+
+/* Allow some columns to wrap if needed */
+#changelist table td:nth-child(4),  /* constraints */
+#changelist table td:nth-child(5)   /* attribute_statistics */
+{
+    white-space: normal;
+    max-width: 300px;
+    word-wrap: break-word;
+}
+
+/* Make sure the table doesn't exceed viewport */
+#changelist {
+    overflow-x: auto;
+}

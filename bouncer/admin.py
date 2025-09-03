@@ -1,5 +1,7 @@
 from django.contrib import admin
 from django.contrib import messages
+from django.urls import reverse
+from django.utils.html import format_html
 from .models import Game, Person
 
 
@@ -9,9 +11,12 @@ class GameAdmin(admin.ModelAdmin):
         "game_id",
         "scenario",
         "status",
+        "constraints_summary",
+        "attribute_statistics_summary",
         "admitted_count",
         "rejected_count",
         "pending_count",
+        "view_people",
         "created_at",
     ]
     list_filter = ["scenario", "status", "created_at"]
@@ -24,6 +29,47 @@ class GameAdmin(admin.ModelAdmin):
     ]
     ordering = ["-created_at"]
     actions = ["start_scenario_1", "start_scenario_2", "start_scenario_3"]
+
+    def constraints_summary(self, obj):
+        """Display the game constraints in a readable format"""
+        if not obj.constraints:
+            return "No constraints"
+
+        constraints_list = []
+        for constraint in obj.constraints:
+            attr_name = constraint.get("attribute", "Unknown")
+            min_count = constraint.get("minCount", 0)
+            constraints_list.append(f"{attr_name}: {min_count}")
+
+        return ", ".join(constraints_list) if constraints_list else "No constraints"
+
+    def attribute_statistics_summary(self, obj):
+        """Display the game attribute statistics in a readable format"""
+        if not obj.attribute_statistics:
+            return "No statistics"
+
+        freq = obj.attribute_statistics.get("relativeFrequencies", {})
+        correlations = obj.attribute_statistics.get("correlations", {})
+
+        if not freq:
+            return "No frequency data"
+
+        # Start with "Total" frequencies
+        freq_list = [f"{attr}: {pct:.1%}" for attr, pct in freq.items()]
+        result = "Total - " + ", ".join(freq_list)
+
+        # Add correlations
+        for attr1, corr_dict in correlations.items():
+            if corr_dict:
+                corr_list = [
+                    f"{attr2}: {corr:.1%}"
+                    for attr2, corr in corr_dict.items()
+                    if corr != 1.0
+                ]
+                if corr_list:
+                    result += f"<br>{attr1} - " + ", ".join(corr_list)
+
+        return format_html(result)
 
     def start_scenario_1(self, request, queryset):
         """Admin action to start a new scenario 1 game"""
@@ -61,19 +107,35 @@ class GameAdmin(admin.ModelAdmin):
                 request, f"Failed to start Scenario {scenario} game: {str(e)}"
             )
 
+    def view_people(self, obj):
+        """Create a link to view people for this specific game"""
+        url = reverse("admin:bouncer_person_changelist") + f"?game__id__exact={obj.id}"
+        return format_html('<a href="{}">View People ({})</a>', url, obj.people.count())
+
+    view_people.short_description = "People"
+
     def has_add_permission(self, request):
         """Disable manual game creation - games should be created via start_new_game"""
         return False
 
+    class Media:
+        css = {"all": ("admin/css/auto_width_columns.css",)}
+
 
 @admin.register(Person)
 class PersonAdmin(admin.ModelAdmin):
-    list_display = ["person_index", "game", "decision", "created_at"]
+    list_display = ["attributes_summary", "person_index", "game", "created_at"]
     list_filter = ["decision", "created_at"]
     search_fields = ["game__game_id"]
     readonly_fields = ["created_at"]
     ordering = ["game", "person_index"]
     actions = ["accept_person", "reject_person"]
+
+    def attributes_summary(self, obj):
+        """Display a summary of the person's attributes"""
+        return ", ".join(key for key, value in obj.attributes.items() if value)
+
+    attributes_summary.short_description = "Attributes"
 
     def accept_person(self, request, queryset):
         """Admin action to accept selected pending people"""
@@ -118,3 +180,6 @@ class PersonAdmin(admin.ModelAdmin):
             messages.warning(request, f"{errors} people could not be processed")
 
     reject_person.short_description = "Reject selected pending people"
+    
+    class Media:
+        css = {"all": ("admin/css/auto_width_columns.css",)}
