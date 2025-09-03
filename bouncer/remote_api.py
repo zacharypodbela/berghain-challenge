@@ -52,8 +52,9 @@ def make_decision_and_get_next(game_id, person_index, accept=None):
     params = {
         "gameId": game_id,
         "personIndex": person_index,
-        "accept": str(accept).lower(),
     }
+    if accept is not None:
+        params["accept"] = str(accept).lower()
 
     response = requests.get(url, params=params)
     response.raise_for_status()
