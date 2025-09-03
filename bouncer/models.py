@@ -1,9 +1,6 @@
 from django.db import models
 from django.utils import timezone
-import requests
-
-PLAYER_ID = "5465bb54-f27c-48b7-9655-db22dc55a78b"
-API_BASE_URL = "https://berghain.challenges.listenlabs.ai"
+from . import remote_api
 
 
 class Game(models.Model):
@@ -48,17 +45,10 @@ class Game(models.Model):
             ValueError: If scenario is not 1, 2, or 3
             requests.RequestException: If API calls fail
         """
-        if scenario not in [1, 2, 3]:
-            raise ValueError("Scenario must be 1, 2, or 3")
-
-        # Step 1: Call new-game API
-        new_game_url = f"{API_BASE_URL}/new-game"
-        new_game_params = {"scenario": scenario, "playerId": PLAYER_ID}
 
         try:
-            response = requests.get(new_game_url, params=new_game_params)
-            response.raise_for_status()
-            game_data = response.json()
+            # Step 1: Call new-game API
+            game_data = remote_api.create_new_game(scenario)
 
             # Step 2: Create game in database if API call successful
             game = cls.objects.create(
@@ -70,14 +60,10 @@ class Game(models.Model):
             )
 
             # Step 3: Get first person
-            first_person_url = f"{API_BASE_URL}/decide-and-next"
-            first_person_params = {"gameId": game.game_id, "personIndex": 0}
-
-            first_person_response = requests.get(
-                first_person_url, params=first_person_params
+            first_person_data = remote_api.make_decision_and_get_next(
+                game_id=game.game_id,
+                person_index=0,
             )
-            first_person_response.raise_for_status()
-            first_person_data = first_person_response.json()
 
             # Step 4: Create first person in database
             # The API returns the next person to make a decision on (person #1)
@@ -92,11 +78,11 @@ class Game(models.Model):
 
             return game
 
-        except requests.RequestException as e:
+        except Exception as e:
             # Clean up any created game if first person call fails
             if "game" in locals():
                 game.delete()
-            raise requests.RequestException(f"API call failed: {e}")
+            raise
 
     def __str__(self):
         return f"Game {self.game_id} - Scenario {self.scenario} - Status: {self.status}"
@@ -139,53 +125,42 @@ class Person(models.Model):
             )
 
         # Call the API
-        url = f"{API_BASE_URL}/decide-and-next"
-        params = {
-            "gameId": self.game.game_id,
-            "personIndex": self.person_index,
-            "accept": str(accept).lower(),
-        }
+        api_data = remote_api.make_decision_and_get_next(
+            game_id=self.game.game_id, person_index=self.person_index, accept=accept
+        )
 
-        try:
-            response = requests.get(url, params=params)
-            response.raise_for_status()
-            api_data = response.json()
+        # Only update database if API call was successful
+        self.decision = accept
+        self.save(update_fields=["decision"])
 
-            # Only update database if API call was successful
-            self.decision = accept
-            self.save(update_fields=["decision"])
+        # Update game status if the game is completed or failed
+        if api_data.get("status") == "completed":
+            self.game.status = "completed"
+            self.game.completed_at = timezone.now()
+            self.game.save(update_fields=["status", "completed_at"])
+        elif api_data.get("status") == "failed":
+            self.game.status = "failed"
+            # Store the failure reason in a way we can see it
+            if "reason" in api_data:
+                # We could add a failure_reason field to Game model, but for now just save status
+                pass
+            self.game.save(update_fields=["status"])
 
-            # Update game status if the game is completed or failed
-            if api_data.get("status") == "completed":
-                self.game.status = "completed"
-                self.game.completed_at = timezone.now()
-                self.game.save(update_fields=["status", "completed_at"])
-            elif api_data.get("status") == "failed":
-                self.game.status = "failed"
-                # Store the failure reason in a way we can see it
-                if "reason" in api_data:
-                    # We could add a failure_reason field to Game model, but for now just save status
-                    pass
-                self.game.save(update_fields=["status"])
+        # Store the next person if provided in the response
+        if "nextPerson" in api_data and api_data["nextPerson"]:
+            next_person_data = api_data["nextPerson"]
+            # Only create if this person doesn't already exist
+            if not Person.objects.filter(
+                game=self.game, person_index=next_person_data["personIndex"]
+            ).exists():
+                Person.objects.create(
+                    game=self.game,
+                    person_index=next_person_data["personIndex"],
+                    attributes=next_person_data["attributes"],
+                    decision=None,  # Pending
+                )
 
-            # Store the next person if provided in the response
-            if "nextPerson" in api_data and api_data["nextPerson"]:
-                next_person_data = api_data["nextPerson"]
-                # Only create if this person doesn't already exist
-                if not Person.objects.filter(
-                    game=self.game, person_index=next_person_data["personIndex"]
-                ).exists():
-                    Person.objects.create(
-                        game=self.game,
-                        person_index=next_person_data["personIndex"],
-                        attributes=next_person_data["attributes"],
-                        decision=None,  # Pending
-                    )
-
-            return api_data
-
-        except requests.RequestException as e:
-            raise requests.RequestException(f"API call failed: {e}")
+        return api_data
 
     def __str__(self):
         decision_str = (
