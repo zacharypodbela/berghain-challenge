@@ -1,14 +1,15 @@
+from typing import Type
 from django.contrib import admin
 from django.contrib import messages
 from django.urls import reverse
 from django.utils.html import format_html
-from .models import Game, Person
+from .models import Game, RemoteGame, LocalGame, Person
 
 
 @admin.register(Game)
 class GameAdmin(admin.ModelAdmin):
     list_display = [
-        "game_id",
+        "game_id_display",
         "scenario",
         "status",
         "constraints_summary",
@@ -31,7 +32,28 @@ class GameAdmin(admin.ModelAdmin):
         "pending_count",
     ]
     ordering = ["-created_at"]
-    actions = ["start_scenario_1", "start_scenario_2", "start_scenario_3"]
+    actions = [
+        "start_scenario_1",
+        "start_scenario_2",
+        "start_scenario_3",
+        "start_local_scenario_1",
+        "start_local_scenario_2",
+        "start_local_scenario_3",
+    ]
+
+    def game_id_display(self, obj):
+        """Display game ID with type indicator"""
+        if isinstance(obj, LocalGame):
+            return format_html(
+                '<span style="color: #0066cc;">[LOCAL]</span> {}', obj.game_id
+            )
+        elif isinstance(obj, RemoteGame):
+            return format_html(
+                '<span style="color: #00aa00;">[REMOTE]</span> {}', obj.game_id
+            )
+        return obj.game_id
+
+    game_id_display.short_description = "Game ID"
 
     def constraints_summary(self, obj):
         """Display the game constraints in a readable format"""
@@ -76,26 +98,56 @@ class GameAdmin(admin.ModelAdmin):
 
     def start_scenario_1(self, request, queryset):
         """Admin action to start a new scenario 1 game"""
-        self._start_new_game(request, 1)
+        self._start_new_game(
+            request,
+            1,
+            RemoteGame,
+        )
 
     start_scenario_1.short_description = "Start new Scenario 1 game"
 
     def start_scenario_2(self, request, queryset):
         """Admin action to start a new scenario 2 game"""
-        self._start_new_game(request, 2)
+        self._start_new_game(
+            request,
+            2,
+            RemoteGame,
+        )
 
     start_scenario_2.short_description = "Start new Scenario 2 game"
 
     def start_scenario_3(self, request, queryset):
         """Admin action to start a new scenario 3 game"""
-        self._start_new_game(request, 3)
+        self._start_new_game(
+            request,
+            3,
+            RemoteGame,
+        )
 
     start_scenario_3.short_description = "Start new Scenario 3 game"
 
-    def _start_new_game(self, request, scenario):
-        """Helper method to start a new game and show appropriate messages"""
+    def start_local_scenario_1(self, request, queryset):
+        """Admin action to start a new local scenario 1 game"""
+        self._start_new_game(request, 1, LocalGame)
+
+    start_local_scenario_1.short_description = "Start new LOCAL Scenario 1 game"
+
+    def start_local_scenario_2(self, request, queryset):
+        """Admin action to start a new local scenario 2 game"""
+        self._start_new_game(request, 2, LocalGame)
+
+    start_local_scenario_2.short_description = "Start new LOCAL Scenario 2 game"
+
+    def start_local_scenario_3(self, request, queryset):
+        """Admin action to start a new local scenario 3 game"""
+        self._start_new_game(request, 3, LocalGame)
+
+    start_local_scenario_3.short_description = "Start new LOCAL Scenario 3 game"
+
+    def _start_new_game(self, request, scenario, game_class: Type[Game]):
+        """Helper method to start a new remote game and show appropriate messages"""
         try:
-            game = Game.start_new_game(scenario)
+            game = game_class.start_new_game(scenario)
             messages.success(
                 request,
                 f"Successfully started new Scenario {scenario} game: {game.game_id}",
@@ -116,12 +168,14 @@ class GameAdmin(admin.ModelAdmin):
         return format_html('<a href="{}">View People ({})</a>', url, obj.people.count())
 
     view_people.short_description = "People"
-    
+
     def view_on_challenge_site(self, obj):
         """Create a link to view this game on the challenge site"""
+        if isinstance(obj, LocalGame):
+            return "N/A"
         url = f"https://berghain.challenges.listenlabs.ai/game/{obj.game_id}"
         return format_html('<a href="{}" target="_blank">View Live Game</a>', url)
-    
+
     view_on_challenge_site.short_description = "Challenge Site"
 
     def has_add_permission(self, request):
@@ -190,6 +244,6 @@ class PersonAdmin(admin.ModelAdmin):
             messages.warning(request, f"{errors} people could not be processed")
 
     reject_person.short_description = "Reject selected pending people"
-    
+
     class Media:
         css = {"all": ("admin/css/auto_width_columns.css",)}

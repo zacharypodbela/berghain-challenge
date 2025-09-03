@@ -110,7 +110,7 @@ class Command(BaseCommand):
         }
         return colors.get(status, "")
 
-    def handle_game_restart(self, game):
+    def handle_game_restart(self, game: Game):
         """Handle restarting a game from where we left off"""
         pending_people = game.people.filter(decision__isnull=True).order_by(
             "person_index"
@@ -133,7 +133,7 @@ class Command(BaseCommand):
                 f"(found {pending_people.count()} pending people)"
             )
 
-    def run_algorithm(self, game, algorithm, delay):
+    def run_algorithm(self, game: Game, algorithm, delay):
         """Run the algorithm on the game until completion or error"""
         decisions_made = 0
 
@@ -163,7 +163,7 @@ class Command(BaseCommand):
 
             try:
                 # Make the API call and update database
-                api_response = pending_person.make_decision(accept=decision)
+                pending_person.make_decision(accept=decision)
                 decisions_made += 1
 
                 # Refresh game status
@@ -176,8 +176,8 @@ class Command(BaseCommand):
                 )
 
                 # Check if game ended
-                if api_response.get("status") in ["completed", "failed"]:
-                    status = api_response.get("status")
+                if game.status in ["completed", "failed"]:
+                    status = game.status
                     self.stdout.write(
                         f"\n{self.style.SUCCESS(f'Game {status.upper()}!')}\n"
                         f"Final score (rejections): {game.rejected_count}\n"
