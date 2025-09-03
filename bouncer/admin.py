@@ -17,12 +17,15 @@ class GameAdmin(admin.ModelAdmin):
         "rejected_count",
         "pending_count",
         "view_people",
+        "view_on_challenge_site",
         "created_at",
     ]
     list_filter = ["scenario", "status", "created_at"]
     search_fields = ["game_id"]
     readonly_fields = [
         "created_at",
+        "completed_at",
+        "completion_reason",
         "admitted_count",
         "rejected_count",
         "pending_count",
@@ -113,6 +116,13 @@ class GameAdmin(admin.ModelAdmin):
         return format_html('<a href="{}">View People ({})</a>', url, obj.people.count())
 
     view_people.short_description = "People"
+    
+    def view_on_challenge_site(self, obj):
+        """Create a link to view this game on the challenge site"""
+        url = f"https://berghain.challenges.listenlabs.ai/game/{obj.game_id}"
+        return format_html('<a href="{}" target="_blank">View Live Game</a>', url)
+    
+    view_on_challenge_site.short_description = "Challenge Site"
 
     def has_add_permission(self, request):
         """Disable manual game creation - games should be created via start_new_game"""

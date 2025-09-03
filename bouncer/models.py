@@ -15,6 +15,7 @@ class Game(models.Model):
     constraints = models.JSONField()
     attribute_statistics = models.JSONField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="running")
+    completion_reason = models.TextField(null=True, blank=True, help_text="Reason for completion or failure")
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
@@ -137,14 +138,13 @@ class Person(models.Model):
         if api_data.get("status") == "completed":
             self.game.status = "completed"
             self.game.completed_at = timezone.now()
-            self.game.save(update_fields=["status", "completed_at"])
+            self.game.completion_reason = "Game completed successfully"
+            self.game.save(update_fields=["status", "completed_at", "completion_reason"])
         elif api_data.get("status") == "failed":
             self.game.status = "failed"
-            # Store the failure reason in a way we can see it
-            if "reason" in api_data:
-                # We could add a failure_reason field to Game model, but for now just save status
-                pass
-            self.game.save(update_fields=["status"])
+            self.game.completion_reason = api_data.get("reason", "Game failed - no reason provided")
+            self.game.completed_at = timezone.now()
+            self.game.save(update_fields=["status", "completed_at", "completion_reason"])
 
         # Store the next person if provided in the response
         if "nextPerson" in api_data and api_data["nextPerson"]:

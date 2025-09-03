@@ -8,7 +8,7 @@ API_BASE_URL = "https://berghain.challenges.listenlabs.ai"
 PLAYER_ID = "5465bb54-f27c-48b7-9655-db22dc55a78b"
 
 
-def create_new_game(scenario):
+def create_new_game(scenario, retries=4):
     """
     Create a new game via the API.
 
@@ -28,12 +28,16 @@ def create_new_game(scenario):
     url = f"{API_BASE_URL}/new-game"
     params = {"scenario": scenario, "playerId": PLAYER_ID}
 
-    response = requests.get(url, params=params)
-    response.raise_for_status()
-    return response.json()
+    # Try once, then retry on 500 error
+    for attempt in range(retries + 1):
+        response = requests.get(url, params=params)
+        if response.status_code == 500 and attempt != retries:
+            continue  # Retry on first 500 error
+        response.raise_for_status()
+        return response.json()
 
 
-def make_decision_and_get_next(game_id, person_index, accept=None):
+def make_decision_and_get_next(game_id, person_index, accept=None, retries=4):
     """
     Make a decision on a person and get the next person.
 
@@ -56,6 +60,10 @@ def make_decision_and_get_next(game_id, person_index, accept=None):
     if accept is not None:
         params["accept"] = str(accept).lower()
 
-    response = requests.get(url, params=params)
-    response.raise_for_status()
-    return response.json()
+    # Try once, then retry on 500 error
+    for attempt in range(retries + 1):
+        response = requests.get(url, params=params)
+        if response.status_code == 500 and attempt != retries:
+            continue  # Retry on first 500 error
+        response.raise_for_status()
+        return response.json()
