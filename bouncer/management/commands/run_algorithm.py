@@ -60,7 +60,7 @@ class Command(BaseCommand):
             self.stdout.write("\nAvailable algorithms:")
             for name in ALGORITHMS.keys():
                 self.stdout.write(f"  {name}")
-            
+
             algorithm_name = input("\nEnter algorithm to use: ").strip()
             if not algorithm_name:
                 raise CommandError("No algorithm provided")
@@ -153,7 +153,7 @@ class Command(BaseCommand):
                 break
 
             # Make decision using algorithm
-            decision = algorithm(pending_person, game)
+            decision = algorithm(pending_person, game, self.stdout)
             decision_text = "ACCEPT" if decision else "REJECT"
 
             self.stdout.write(

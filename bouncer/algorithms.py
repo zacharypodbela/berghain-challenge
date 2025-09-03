@@ -8,7 +8,7 @@ on people trying to get into the nightclub.
 from bouncer.models import Game, Person
 
 
-def too_nice_bouncer(person: Person, game: Game):
+def too_nice_bouncer(person: Person, game: Game, stdout):
     """
     Simple algorithm that always accepts everyone.
 
@@ -22,7 +22,7 @@ def too_nice_bouncer(person: Person, game: Game):
     return True
 
 
-def so_mean_bouncer(person: Person, game: Game):
+def so_mean_bouncer(person: Person, game: Game, stdout):
     """
     Simple algorithm that always rejects everyone.
 
@@ -36,7 +36,7 @@ def so_mean_bouncer(person: Person, game: Game):
     return False
 
 
-def optimal_markov_bouncer(person: Person, game: Game):
+def optimal_markov_bouncer(person: Person, game: Game, stdout):
     """
     Markov Decision Process approach to minimize rejections while meeting constraints.
 
@@ -198,7 +198,7 @@ def _compute_counters(game, y_key="young", w_key="well_dressed"):
     return A, B, Y1, W1, N
 
 
-def chat_gpt_bouncer(person: Person, game: Game) -> bool:
+def chat_gpt_bouncer(person: Person, game: Game, stdout) -> bool:
     """
     Online decision rule with 'both-credit' and 'debt' guards.
 
