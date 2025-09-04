@@ -296,14 +296,14 @@ def generate_probability_vectors(attribute_statistics: dict[str, Any]) -> Sample
 
 
 def generate_correlated_attributes(
-    params: SamplerParams, num_people: int
+    params: SamplerParams, num_people: int, seed: int | None = None
 ) -> list[dict[str, bool]]:
     """
     Sample `num_people` people from the fitted joint in O(1) each using the alias table.
     Returns a list of {attr: bool} dicts consistent with `params.attributes` bit order.
     """
     K = len(params.attributes)
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(seed)
     idx = _sample_alias(params.alias_prob, params.alias_alias, num_people, rng)
 
     # Map state index -> bit vector -> dict
@@ -328,5 +328,5 @@ class CorrelatedAttributeGenerator:
     def __init__(self, attribute_statistics: dict[str, Any]) -> None:
         self.params = generate_probability_vectors(attribute_statistics)
 
-    def sample(self, num_people: int) -> list[dict[str, bool]]:
-        return generate_correlated_attributes(self.params, num_people)
+    def sample(self, num_people: int, seed: int | None = None) -> list[dict[str, bool]]:
+        return generate_correlated_attributes(self.params, num_people, seed=seed)
