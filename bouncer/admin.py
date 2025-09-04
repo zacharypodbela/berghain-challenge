@@ -1,10 +1,15 @@
+from typing import Any
+
 from django.contrib import admin, messages
 from django.db.models import QuerySet
-from django.http import HttpRequest
-from django.urls import reverse
+from django.http import HttpRequest, HttpResponse
+from django.shortcuts import get_object_or_404
+from django.template.response import TemplateResponse
+from django.urls import path, reverse
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
 
+from .constants import CAPACITY, REJECTION_LIMIT
 from .models import Game, LocalGame, Person, RemoteGame
 
 
@@ -12,10 +17,9 @@ from .models import Game, LocalGame, Person, RemoteGame
 class GameAdmin(admin.ModelAdmin):
     list_display = [
         "game_id_display",
+        "view_details",
         "scenario",
         "status",
-        "constraints_summary",
-        "attribute_statistics_summary",
         "admitted_count",
         "rejected_count",
         "pending_count",
@@ -56,47 +60,6 @@ class GameAdmin(admin.ModelAdmin):
         return obj.game_id
 
     game_id_display.short_description = "Game ID"  # type: ignore [attr-defined]
-
-    def constraints_summary(self, obj: Game) -> str:
-        """Display the game constraints in a readable format"""
-        if not obj.constraints:
-            return "No constraints"
-
-        constraints_list = []
-        for constraint in obj.constraints:
-            attr_name = constraint.get("attribute", "Unknown")
-            min_count = constraint.get("minCount", 0)
-            constraints_list.append(f"{attr_name}: {min_count}")
-
-        return ", ".join(constraints_list) if constraints_list else "No constraints"
-
-    def attribute_statistics_summary(self, obj: Game) -> SafeString:
-        """Display the game attribute statistics in a readable format"""
-        if not obj.attribute_statistics:
-            return "No statistics"
-
-        freq = obj.attribute_statistics.get("relativeFrequencies", {})
-        correlations = obj.attribute_statistics.get("correlations", {})
-
-        if not freq:
-            return "No frequency data"
-
-        # Start with "Total" frequencies
-        freq_list = [f"{attr}: {pct:.1%}" for attr, pct in freq.items()]
-        result = "Total - " + ", ".join(freq_list)
-
-        # Add correlations
-        for attr1, corr_dict in correlations.items():
-            if corr_dict:
-                corr_list = [
-                    f"{attr2}: {corr:.1%}"
-                    for attr2, corr in corr_dict.items()
-                    if corr != 1.0
-                ]
-                if corr_list:
-                    result += f"<br>{attr1} - " + ", ".join(corr_list)
-
-        return format_html(result)
 
     def start_scenario_1(self, request: HttpRequest, queryset: QuerySet[Game]) -> None:
         """Admin action to start a new scenario 1 game"""
@@ -188,9 +151,105 @@ class GameAdmin(admin.ModelAdmin):
 
     view_on_challenge_site.short_description = "Challenge Site"  # type: ignore [attr-defined]
 
+    def view_details(self, obj: Game) -> SafeString:
+        """Create a link to the detailed game view"""
+        url = reverse("admin:bouncer_game_detail", args=[obj.pk])
+        return format_html('<a href="{}">View Details</a>', url)
+
+    view_details.short_description = "Details"  # type: ignore [attr-defined]
+
     def has_add_permission(self, request: HttpRequest) -> bool:
         """Disable manual game creation - games should be created via start_new_game"""
         return False
+
+    def get_urls(self) -> list[Any]:
+        """Add custom URLs for detailed game views"""
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                "<path:object_id>/detail/",
+                self.admin_site.admin_view(self.game_detail_view),
+                name="bouncer_game_detail",
+            ),
+        ]
+        return custom_urls + urls  # type: ignore [no-any-return]
+
+    def game_detail_view(self, request: HttpRequest, object_id: str) -> HttpResponse:
+        """Custom detailed view for a game showing comprehensive statistics"""
+        game = get_object_or_404(Game, pk=object_id)
+
+        # Calculate constraint progress
+        constraint_progress = []
+        for constraint in game.constraints:
+            attr_name = constraint["attribute"]
+            required = constraint["minCount"]
+
+            # Count admitted people with this attribute
+            actual = game.people.filter(
+                decision=True, **{f"attributes__{attr_name}": True}
+            ).count()
+
+            percentage = (actual / required) * 100 if required > 0 else 0
+            over_target = max(0, actual - required)
+
+            constraint_progress.append(
+                {
+                    "name": attr_name.replace("_", " ").title(),
+                    "actual": actual,
+                    "required": required,
+                    "percentage": percentage,
+                    "over_target": over_target,
+                    "is_met": actual >= required,
+                }
+            )
+
+        # Calculate efficiency (acceptance rate)
+        total_decisions = game.admitted_count + game.rejected_count
+        efficiency = (
+            (game.admitted_count / total_decisions * 100) if total_decisions > 0 else 0
+        )
+
+        # Calculate capacity info
+        capacity_percentage = (game.admitted_count / CAPACITY) * 100
+
+        # Rejection limit info
+        rejections_until_limit = REJECTION_LIMIT - game.rejected_count
+
+        # Time calculations
+        duration = None
+        if game.completed_at and game.created_at:
+            delta = game.completed_at - game.created_at
+            hours = delta.total_seconds() // 3600
+            minutes = (delta.total_seconds() % 3600) // 60
+            if hours > 0:
+                duration = f"{int(hours)}h {int(minutes)}m"
+            else:
+                duration = f"{int(minutes)}m"
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": f"Game Details: {game.game_id}",
+            "game": game,
+            "constraint_progress": constraint_progress,
+            "efficiency": efficiency,
+            "capacity": CAPACITY,
+            "capacity_percentage": capacity_percentage,
+            "rejection_limit": REJECTION_LIMIT,
+            "rejections_until_limit": rejections_until_limit,
+            "duration": duration,
+            "opts": self.model._meta,
+        }
+
+        return TemplateResponse(request, "admin/bouncer/game/detail.html", context)
+
+    def changelist_view(
+        self, request: HttpRequest, extra_context: dict[str, str] | None = None
+    ) -> TemplateResponse:
+        """Override changelist to add detail links"""
+        if extra_context is None:
+            extra_context = {}
+        extra_context["show_detail_link"] = "true"  # String value for template
+        return super().changelist_view(request, extra_context)
 
     class Media:
         css = {"all": ("admin/css/auto_width_columns.css",)}
