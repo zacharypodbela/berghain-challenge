@@ -3,10 +3,12 @@ Constants for Berghain Challenge scenarios
 These are extracted from actual API responses and are consistent across all games
 """
 
+from typing import Any
+
 CAPACITY = 1000  # Max people that can be admitted
 REJECTION_LIMIT = 20000  # Max rejections before game fails
 
-SCENARIO_CONFIGS = {
+SCENARIO_CONFIGS: dict[int, dict[str, Any]] = {
     1: {
         "constraints": [
             {"attribute": "young", "minCount": 600},

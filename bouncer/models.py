@@ -203,12 +203,13 @@ class LocalGame(Game):
 
     def _create_next_person(self, person_index: int) -> Person:
         """Generate and create a single person on-demand"""
-        from .math import generate_correlated_attributes
-
         # Generate one person's attributes
-        people_attributes = generate_correlated_attributes(
-            self.attribute_statistics, num_people=1, seed=None
-        )
+        from .math import generate_correlated_attributes, generate_probability_vectors
+
+        params = generate_probability_vectors(
+            self.attribute_statistics
+        )  # TODO: cache this to optimize
+        people_attributes = generate_correlated_attributes(params, num_people=1)
 
         # Create the person
         return cast(
