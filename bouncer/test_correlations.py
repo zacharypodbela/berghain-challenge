@@ -4,7 +4,7 @@ from typing import Any
 import numpy as np
 
 import bouncer.constants as consts
-from bouncer.math import generate_correlated_attributes, generate_probability_vectors
+from bouncer.math import CorrelatedAttributeGenerator
 from bouncer.models import Game
 
 
@@ -132,13 +132,13 @@ def test_all_scenarios(n: int) -> None:
     for scenario_id, scenario in consts.SCENARIO_CONFIGS.items():
         print(f"Testing scenario {scenario_id}...")
         attribute_statistics = scenario["attribute_statistics"]
-        sampler_params = generate_probability_vectors(attribute_statistics)
-        people = generate_correlated_attributes(sampler_params, n)
+        generator = CorrelatedAttributeGenerator(attribute_statistics)
+        people = generator.sample(n)
         test_generate_attribute_statistics(attribute_statistics, people)
         print()
 
 
-# Test our test, by feeding it populations from server-side games and ensuring they pass (rather than generate_correlated_attributes).
+# Test our test by feeding it populations from server-side games and ensuring they pass
 def get_population_attributes_from_game(game_id: str) -> list[dict[str, bool]]:
     game = Game.objects.get(game_id=game_id)
     return list(game.people.values_list("attributes", flat=True))

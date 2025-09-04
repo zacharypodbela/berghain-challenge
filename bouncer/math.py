@@ -317,3 +317,16 @@ def generate_correlated_attributes(
         d = {attrs[k]: bool(row[k]) for k in range(K)}
         people.append(d)
     return people
+
+
+# ---------- Easy to use class that stitches it all together ----------
+
+
+class CorrelatedAttributeGenerator:
+    params: SamplerParams
+
+    def __init__(self, attribute_statistics: dict[str, Any]) -> None:
+        self.params = generate_probability_vectors(attribute_statistics)
+
+    def sample(self, num_people: int) -> list[dict[str, bool]]:
+        return generate_correlated_attributes(self.params, num_people)

@@ -7,6 +7,7 @@ from django.utils import timezone
 from polymorphic.models import PolymorphicModel
 
 from bouncer.constants import CAPACITY, REJECTION_LIMIT
+from bouncer.math import CorrelatedAttributeGenerator
 
 from . import remote_api
 
@@ -167,6 +168,15 @@ class RemoteGame(Game):
 class LocalGame(Game):
     """Game that runs locally without API calls"""
 
+    attribute_generator: CorrelatedAttributeGenerator
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # TODO: This is being computed every time the model is loaded from DB. Optimize by caching (or storing in DB).
+        self.attribute_generator = CorrelatedAttributeGenerator(
+            self.attribute_statistics
+        )
+
     @classmethod
     def start_new_game(cls, scenario: int, **kwargs: Any) -> LocalGame:
         """
@@ -204,12 +214,7 @@ class LocalGame(Game):
     def _create_next_person(self, person_index: int) -> Person:
         """Generate and create a single person on-demand"""
         # Generate one person's attributes
-        from .math import generate_correlated_attributes, generate_probability_vectors
-
-        params = generate_probability_vectors(
-            self.attribute_statistics
-        )  # TODO: cache this to optimize
-        people_attributes = generate_correlated_attributes(params, num_people=1)
+        people_attributes = self.attribute_generator.sample(1)
 
         # Create the person
         return cast(
