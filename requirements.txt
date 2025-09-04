@@ -11,3 +11,4 @@ numpy==2.3.2
 django-extensions==3.2.3
 ipython==8.31.0
 django-polymorphic==4.1.0
+gymnasium==0.29.1
