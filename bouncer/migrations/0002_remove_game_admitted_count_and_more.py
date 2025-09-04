@@ -4,18 +4,17 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('bouncer', '0001_initial'),
+        ("bouncer", "0001_initial"),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='game',
-            name='admitted_count',
+            model_name="game",
+            name="admitted_count",
         ),
         migrations.RemoveField(
-            model_name='game',
-            name='rejected_count',
+            model_name="game",
+            name="rejected_count",
         ),
     ]

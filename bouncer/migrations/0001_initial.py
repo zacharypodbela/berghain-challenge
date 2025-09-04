@@ -5,45 +5,66 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
-    dependencies = [
-    ]
+    dependencies = []
 
     operations = [
         migrations.CreateModel(
-            name='Game',
+            name="Game",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('game_id', models.CharField(max_length=255, unique=True)),
-                ('scenario', models.IntegerField()),
-                ('player_id', models.CharField(max_length=255)),
-                ('constraints', models.JSONField()),
-                ('attribute_statistics', models.JSONField()),
-                ('status', models.CharField(default='running', max_length=20)),
-                ('admitted_count', models.IntegerField(default=0)),
-                ('rejected_count', models.IntegerField(default=0)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('completed_at', models.DateTimeField(blank=True, null=True)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("game_id", models.CharField(max_length=255, unique=True)),
+                ("scenario", models.IntegerField()),
+                ("player_id", models.CharField(max_length=255)),
+                ("constraints", models.JSONField()),
+                ("attribute_statistics", models.JSONField()),
+                ("status", models.CharField(default="running", max_length=20)),
+                ("admitted_count", models.IntegerField(default=0)),
+                ("rejected_count", models.IntegerField(default=0)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("completed_at", models.DateTimeField(blank=True, null=True)),
             ],
             options={
-                'ordering': ['-created_at'],
+                "ordering": ["-created_at"],
             },
         ),
         migrations.CreateModel(
-            name='Person',
+            name="Person",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('person_index', models.IntegerField()),
-                ('attributes', models.JSONField()),
-                ('decision', models.BooleanField(blank=True, null=True)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('game', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='people', to='bouncer.game')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("person_index", models.IntegerField()),
+                ("attributes", models.JSONField()),
+                ("decision", models.BooleanField(blank=True, null=True)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                (
+                    "game",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="people",
+                        to="bouncer.game",
+                    ),
+                ),
             ],
             options={
-                'ordering': ['person_index'],
-                'unique_together': {('game', 'person_index')},
+                "ordering": ["person_index"],
+                "unique_together": {("game", "person_index")},
             },
         ),
     ]

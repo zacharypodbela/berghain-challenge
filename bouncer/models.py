@@ -1,15 +1,23 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, ClassVar, cast
+
 from django.db import models
 from django.utils import timezone
 from polymorphic.models import PolymorphicModel
 
 from bouncer.constants import CAPACITY, REJECTION_LIMIT
+
 from . import remote_api
+
+if TYPE_CHECKING:
+    from typing import Self
 
 
 class Game(PolymorphicModel):
     """Base class for all games"""
 
-    STATUS_CHOICES = [
+    STATUS_CHOICES: ClassVar[list[tuple[str, str]]] = [
         ("running", "Running"),
         ("completed", "Completed"),
         ("failed", "Failed"),
@@ -27,27 +35,29 @@ class Game(PolymorphicModel):
     completed_at = models.DateTimeField(null=True, blank=True)
 
     @property
-    def admitted_count(self):
-        return self.people.filter(decision=True).count()
+    def admitted_count(self) -> int:
+        return cast(int, self.people.filter(decision=True).count())
 
     @property
-    def rejected_count(self):
-        return self.people.filter(decision=False).count()
+    def rejected_count(self) -> int:
+        return cast(int, self.people.filter(decision=False).count())
 
     @property
-    def pending_count(self):
-        return self.people.filter(decision__isnull=True).count()
+    def pending_count(self) -> int:
+        return cast(int, self.people.filter(decision__isnull=True).count())
 
     @classmethod
-    def start_new_game(cls, scenario, **kwargs):
+    def start_new_game(cls, scenario: int, **kwargs: Any) -> Self:
         raise NotImplementedError("Subclasses must implement start_new_game()")
 
-    def make_decision_and_get_next(self, person: "Person", accept: bool):
+    def make_decision_and_get_next(
+        self, person: Person, accept: bool
+    ) -> dict[str, Any]:
         raise NotImplementedError(
             "Subclasses must implement make_decision_and_get_next()"
         )
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Game {self.game_id} - Scenario {self.scenario} - Status: {self.status}"
 
     class Meta:
@@ -58,7 +68,7 @@ class RemoteGame(Game):
     """Game that uses the remote API"""
 
     @classmethod
-    def start_new_game(cls, scenario):
+    def start_new_game(cls, scenario: int, **kwargs: Any) -> RemoteGame:
         """
         Start a new game by calling the API and storing the game and first person in the database.
 
@@ -103,15 +113,17 @@ class RemoteGame(Game):
                     decision=None,  # Pending
                 )
 
-            return game
+            return cast(RemoteGame, game)
 
-        except Exception as e:
+        except Exception:
             # Clean up any created game if first person call fails
             if "game" in locals():
                 game.delete()
             raise
 
-    def make_decision_and_get_next(self, person: "Person", accept: bool):
+    def make_decision_and_get_next(
+        self, person: Person, accept: bool
+    ) -> dict[str, Any]:
         # Call the API
         api_data = remote_api.make_decision_and_get_next(
             game_id=self.game_id, person_index=person.person_index, accept=accept
@@ -149,12 +161,14 @@ class RemoteGame(Game):
                     decision=None,  # Pending
                 )
 
+        return api_data
+
 
 class LocalGame(Game):
     """Game that runs locally without API calls"""
 
     @classmethod
-    def start_new_game(cls, scenario):
+    def start_new_game(cls, scenario: int, **kwargs: Any) -> LocalGame:
         """
         Create a local game that generates people on-demand, like RemoteGame.
 
@@ -165,6 +179,7 @@ class LocalGame(Game):
             LocalGame instance with first person ready
         """
         import uuid
+
         from .constants import SCENARIO_CONFIGS
 
         if scenario not in SCENARIO_CONFIGS:
@@ -184,9 +199,9 @@ class LocalGame(Game):
         # Create just the first person (like RemoteGame does)
         game._create_next_person(0)
 
-        return game
+        return cast(LocalGame, game)
 
-    def _create_next_person(self, person_index):
+    def _create_next_person(self, person_index: int) -> Person:
         """Generate and create a single person on-demand"""
         from .math import generate_correlated_attributes
 
@@ -196,14 +211,17 @@ class LocalGame(Game):
         )
 
         # Create the person
-        return Person.objects.create(
-            game=self,
-            person_index=person_index,
-            attributes=people_attributes[0],
-            decision=None,
+        return cast(
+            Person,
+            Person.objects.create(
+                game=self,
+                person_index=person_index,
+                attributes=people_attributes[0],
+                decision=None,
+            ),
         )
 
-    def check_constraints_met(self):
+    def check_constraints_met(self) -> bool:
         """
         Check if all constraints are met for a game.
 
@@ -223,7 +241,9 @@ class LocalGame(Game):
 
         return True
 
-    def make_decision_and_get_next(self, person: "Person", accept: bool):
+    def make_decision_and_get_next(
+        self, person: Person, accept: bool
+    ) -> dict[str, Any]:
         """
         Process a decision for a local game person without API calls.
         Updates the person's decision and checks game completion.
@@ -255,7 +275,7 @@ class LocalGame(Game):
             else:
                 self.status = "failed"
                 self.completion_reason = (
-                    f"Local game failed - Capacity reached without meeting constraints"
+                    "Local game failed - Capacity reached without meeting constraints"
                 )
             self.completed_at = timezone.now()
             self.save(update_fields=["status", "completion_reason", "completed_at"])
@@ -274,6 +294,8 @@ class LocalGame(Game):
             next_person_index = person.person_index + 1
             self._create_next_person(next_person_index)
 
+        return cast(dict[str, Any], {"status": self.status})
+
 
 class Person(models.Model):
     game = models.ForeignKey(Game, on_delete=models.CASCADE, related_name="people")
@@ -284,7 +306,7 @@ class Person(models.Model):
     )  # True=accept, False=reject, None=pending
     created_at = models.DateTimeField(auto_now_add=True)
 
-    def make_decision(self, accept):
+    def make_decision(self, accept: bool) -> dict[str, Any]:
         """
         Args:
             accept (bool): True to accept the person, False to reject
@@ -306,9 +328,9 @@ class Person(models.Model):
                 f"Cannot make decisions on game with status: {self.game.status}"
             )
 
-        self.game.make_decision_and_get_next(self, accept)
+        return cast(dict[str, Any], self.game.make_decision_and_get_next(self, accept))
 
-    def __str__(self):
+    def __str__(self) -> str:
         decision_str = (
             "Accepted"
             if self.decision is True
@@ -322,4 +344,4 @@ class Person(models.Model):
 
     class Meta:
         ordering = ["person_index"]
-        unique_together = ["game", "person_index"]
+        unique_together = [["game", "person_index"]]

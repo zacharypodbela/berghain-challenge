@@ -4,15 +4,16 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('bouncer', '0004_remove_game_player_id'),
+        ("bouncer", "0004_remove_game_player_id"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='game',
-            name='completion_reason',
-            field=models.TextField(blank=True, help_text='Reason for completion or failure', null=True),
+            model_name="game",
+            name="completion_reason",
+            field=models.TextField(
+                blank=True, help_text="Reason for completion or failure", null=True
+            ),
         ),
     ]

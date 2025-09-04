@@ -2,17 +2,19 @@
 Django management command to run bouncer algorithms on games
 """
 
-from django.core.management.base import BaseCommand, CommandError
-from django.utils import timezone
-from bouncer.models import Game, Person
-from bouncer.algorithms import get_algorithm, ALGORITHMS
 import time
+from typing import Any
+
+from django.core.management.base import BaseCommand, CommandError, CommandParser
+
+from bouncer.algorithms import ALGORITHMS, get_algorithm
+from bouncer.models import Game
 
 
 class Command(BaseCommand):
     help = "Run a bouncer algorithm on a game"
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument(
             "--game-id",
             type=str,
@@ -30,7 +32,7 @@ class Command(BaseCommand):
             help="Delay in seconds between decisions (default: 0.0)",
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         game_id = options["game_id"]
         algorithm_name = options["algorithm"]
         delay = options["delay"]
@@ -68,14 +70,14 @@ class Command(BaseCommand):
         # Get and validate game
         try:
             game = Game.objects.get(game_id=game_id)
-        except Game.DoesNotExist:
-            raise CommandError(f'Game "{game_id}" does not exist')
+        except Game.DoesNotExist as e:
+            raise CommandError(f'Game "{game_id}" does not exist') from e
 
         # Get algorithm
         try:
             algorithm = get_algorithm(algorithm_name)
         except ValueError as e:
-            raise CommandError(str(e))
+            raise CommandError(str(e)) from e
 
         self.stdout.write(
             f"\n{self.style.SUCCESS('Starting algorithm run:')}\n"
@@ -100,7 +102,7 @@ class Command(BaseCommand):
         # Run the algorithm
         self.run_algorithm(game, algorithm, delay)
 
-    def get_status_color(self, status):
+    def get_status_color(self, status: str) -> Any | None:
         """Get color styling for game status"""
         colors = {
             "running": self.style.WARNING,
@@ -110,7 +112,7 @@ class Command(BaseCommand):
         }
         return colors.get(status, "")
 
-    def handle_game_restart(self, game: Game):
+    def handle_game_restart(self, game: Game) -> None:
         """Handle restarting a game from where we left off"""
         pending_people = game.people.filter(decision__isnull=True).order_by(
             "person_index"
@@ -133,7 +135,7 @@ class Command(BaseCommand):
                 f"(found {pending_people.count()} pending people)"
             )
 
-    def run_algorithm(self, game: Game, algorithm, delay):
+    def run_algorithm(self, game: Game, algorithm: Any, delay: float) -> None:
         """Run the algorithm on the game until completion or error"""
         decisions_made = 0
 

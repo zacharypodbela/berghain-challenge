@@ -1,8 +1,14 @@
 import random
+from typing import Any
+
 import numpy as np
 
 
-def generate_correlated_attributes(attribute_statistics, num_people=20000, seed=None):
+def generate_correlated_attributes(
+    attribute_statistics: dict[str, Any],
+    num_people: int = 20000,
+    seed: int | None = None,
+) -> list[dict[str, bool]]:
     """
     Generate people with attributes following the correct marginal probabilities
     and correlations for a given scenario.

@@ -4,15 +4,22 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('bouncer', '0002_remove_game_admitted_count_and_more'),
+        ("bouncer", "0002_remove_game_admitted_count_and_more"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='game',
-            name='status',
-            field=models.CharField(choices=[('running', 'Running'), ('completed', 'Completed'), ('failed', 'Failed')], default='running', max_length=20),
+            model_name="game",
+            name="status",
+            field=models.CharField(
+                choices=[
+                    ("running", "Running"),
+                    ("completed", "Completed"),
+                    ("failed", "Failed"),
+                ],
+                default="running",
+                max_length=20,
+            ),
         ),
     ]

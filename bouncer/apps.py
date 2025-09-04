@@ -2,5 +2,5 @@ from django.apps import AppConfig
 
 
 class BouncerConfig(AppConfig):
-    default_auto_field = 'django.db.models.BigAutoField'
-    name = 'bouncer'
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "bouncer"

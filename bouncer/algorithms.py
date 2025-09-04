@@ -5,10 +5,13 @@ This module contains different algorithms for making accept/reject decisions
 on people trying to get into the nightclub.
 """
 
+from collections.abc import Callable
+from typing import TextIO
+
 from bouncer.models import Game, Person
 
 
-def too_nice_bouncer(person: Person, game: Game, stdout):
+def too_nice_bouncer(person: Person, game: Game, stdout: TextIO | None) -> bool:
     """
     Simple algorithm that always accepts everyone.
 
@@ -22,7 +25,7 @@ def too_nice_bouncer(person: Person, game: Game, stdout):
     return True
 
 
-def so_mean_bouncer(person: Person, game: Game, stdout):
+def so_mean_bouncer(person: Person, game: Game, stdout: TextIO | None) -> bool:
     """
     Simple algorithm that always rejects everyone.
 
@@ -36,7 +39,7 @@ def so_mean_bouncer(person: Person, game: Game, stdout):
     return False
 
 
-def optimal_markov_bouncer(person: Person, game: Game, stdout):
+def optimal_markov_bouncer(person: Person, game: Game, stdout: TextIO | None) -> bool:
     """
     Markov Decision Process approach to minimize rejections while meeting constraints.
 
@@ -85,7 +88,6 @@ def optimal_markov_bouncer(person: Person, game: Game, stdout):
 
     # Remaining capacity
     capacity_remaining = 1000 - admitted
-    rejection_limit_remaining = 20000 - rejected
 
     # Person attributes
     is_young = person.attributes.get("young", False)
@@ -127,7 +129,7 @@ def optimal_markov_bouncer(person: Person, game: Game, stdout):
     if is_young and not is_well_dressed:
         if young_needed == 0:
             # We've met young quota, only accept if we have lots of capacity
-            return capacity_remaining > (well_dressed_needed + 100)
+            return bool(capacity_remaining > (well_dressed_needed + 100))
 
         # Accept based on urgency and game state
         threshold = base_threshold / (urgency_multiplier * (1 + young_urgency))
@@ -137,7 +139,7 @@ def optimal_markov_bouncer(person: Person, game: Game, stdout):
     if is_well_dressed and not is_young:
         if well_dressed_needed == 0:
             # We've met well_dressed quota, only accept if we have lots of capacity
-            return capacity_remaining > (young_needed + 100)
+            return bool(capacity_remaining > (young_needed + 100))
 
         # Accept based on urgency and game state
         threshold = base_threshold / (urgency_multiplier * (1 + well_dressed_urgency))
@@ -153,7 +155,9 @@ def optimal_markov_bouncer(person: Person, game: Game, stdout):
 
 
 # --- Helper: classify incoming person into the four buckets ---
-def _classify_person(person, y_key="young", w_key="well_dressed"):
+def _classify_person(
+    person: Person, y_key: str = "young", w_key: str = "well_dressed"
+) -> str:
     y = bool(person.attributes.get(y_key, False))
     w = bool(person.attributes.get(w_key, False))
     if y and w:
@@ -166,7 +170,7 @@ def _classify_person(person, y_key="young", w_key="well_dressed"):
 
 
 # --- Helper: pull constraints with proper parsing ---
-def _parse_constraints(game):
+def _parse_constraints(game: Game) -> tuple[int, int, int, int]:
     # Parse constraints like other algorithms
     constraints = {c["attribute"]: c["minCount"] for c in game.constraints}
     total = 1000  # Fixed total capacity
@@ -177,7 +181,9 @@ def _parse_constraints(game):
 
 
 # --- Helper: compute live counters from accepted people so far ---
-def _compute_counters(game, y_key="young", w_key="well_dressed"):
+def _compute_counters(
+    game: Game, y_key: str = "young", w_key: str = "well_dressed"
+) -> tuple[int, int, int, int, int]:
     accepted = game.people.filter(decision=True)
     A = accepted.count()
 
@@ -198,7 +204,7 @@ def _compute_counters(game, y_key="young", w_key="well_dressed"):
     return A, B, Y1, W1, N
 
 
-def chat_gpt_bouncer(person: Person, game: Game, stdout) -> bool:
+def chat_gpt_bouncer(person: Person, game: Game, stdout: TextIO | None) -> bool:
     """
     Online decision rule with 'both-credit' and 'debt' guards.
 
@@ -273,7 +279,8 @@ def chat_gpt_bouncer(person: Person, game: Game, stdout) -> bool:
 
 
 # Registry of available algorithms
-ALGORITHMS = {
+AlgorithmFunc = Callable[[Person, Game, TextIO | None], bool]
+ALGORITHMS: dict[str, AlgorithmFunc] = {
     "too_nice_bouncer": too_nice_bouncer,
     "so_mean_bouncer": so_mean_bouncer,
     "optimal_markov_bouncer": optimal_markov_bouncer,
@@ -281,7 +288,7 @@ ALGORITHMS = {
 }
 
 
-def get_algorithm(name):
+def get_algorithm(name: str) -> AlgorithmFunc:
     """Get an algorithm by name"""
     if name not in ALGORITHMS:
         raise ValueError(

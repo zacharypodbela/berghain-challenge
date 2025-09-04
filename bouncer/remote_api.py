@@ -2,13 +2,15 @@
 Remote API client for Berghain Challenge API
 """
 
+from typing import Any, cast
+
 import requests
 
 API_BASE_URL = "https://berghain.challenges.listenlabs.ai"
 PLAYER_ID = "5465bb54-f27c-48b7-9655-db22dc55a78b"
 
 
-def create_new_game(scenario, retries=4):
+def create_new_game(scenario: int, retries: int = 4) -> dict[str, Any]:
     """
     Create a new game via the API.
 
@@ -26,7 +28,7 @@ def create_new_game(scenario, retries=4):
         raise ValueError("Scenario must be 1, 2, or 3")
 
     url = f"{API_BASE_URL}/new-game"
-    params = {"scenario": scenario, "playerId": PLAYER_ID}
+    params: dict[str, int | str] = {"scenario": scenario, "playerId": PLAYER_ID}
 
     # Try once, then retry on 500 error
     for attempt in range(retries + 1):
@@ -34,10 +36,15 @@ def create_new_game(scenario, retries=4):
         if response.status_code == 500 and attempt != retries:
             continue  # Retry on first 500 error
         response.raise_for_status()
-        return response.json()
+        return cast(dict[str, Any], response.json())
+
+    # This should never be reached due to raise_for_status, but mypy needs it
+    raise requests.RequestException("Maximum retries exceeded")
 
 
-def make_decision_and_get_next(game_id, person_index, accept=None, retries=4):
+def make_decision_and_get_next(
+    game_id: str, person_index: int, accept: bool | None = None, retries: int = 4
+) -> dict[str, Any]:
     """
     Make a decision on a person and get the next person.
 
@@ -53,7 +60,7 @@ def make_decision_and_get_next(game_id, person_index, accept=None, retries=4):
         requests.RequestException: If API call fails
     """
     url = f"{API_BASE_URL}/decide-and-next"
-    params = {
+    params: dict[str, str | int] = {
         "gameId": game_id,
         "personIndex": person_index,
     }
@@ -66,4 +73,7 @@ def make_decision_and_get_next(game_id, person_index, accept=None, retries=4):
         if response.status_code == 500 and attempt != retries:
             continue  # Retry on first 500 error
         response.raise_for_status()
-        return response.json()
+        return cast(dict[str, Any], response.json())
+
+    # This should never be reached due to raise_for_status, but mypy needs it
+    raise requests.RequestException("Maximum retries exceeded")

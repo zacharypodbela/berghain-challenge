@@ -1,9 +1,11 @@
-from typing import Type
-from django.contrib import admin
-from django.contrib import messages
+from django.contrib import admin, messages
+from django.db.models import QuerySet
+from django.http import HttpRequest
 from django.urls import reverse
 from django.utils.html import format_html
-from .models import Game, RemoteGame, LocalGame, Person
+from django.utils.safestring import SafeString
+
+from .models import Game, LocalGame, Person, RemoteGame
 
 
 @admin.register(Game)
@@ -41,7 +43,7 @@ class GameAdmin(admin.ModelAdmin):
         "start_local_scenario_3",
     ]
 
-    def game_id_display(self, obj):
+    def game_id_display(self, obj: Game) -> SafeString | str:
         """Display game ID with type indicator"""
         if isinstance(obj, LocalGame):
             return format_html(
@@ -53,9 +55,9 @@ class GameAdmin(admin.ModelAdmin):
             )
         return obj.game_id
 
-    game_id_display.short_description = "Game ID"
+    game_id_display.short_description = "Game ID"  # type: ignore [attr-defined]
 
-    def constraints_summary(self, obj):
+    def constraints_summary(self, obj: Game) -> str:
         """Display the game constraints in a readable format"""
         if not obj.constraints:
             return "No constraints"
@@ -68,7 +70,7 @@ class GameAdmin(admin.ModelAdmin):
 
         return ", ".join(constraints_list) if constraints_list else "No constraints"
 
-    def attribute_statistics_summary(self, obj):
+    def attribute_statistics_summary(self, obj: Game) -> SafeString:
         """Display the game attribute statistics in a readable format"""
         if not obj.attribute_statistics:
             return "No statistics"
@@ -96,7 +98,7 @@ class GameAdmin(admin.ModelAdmin):
 
         return format_html(result)
 
-    def start_scenario_1(self, request, queryset):
+    def start_scenario_1(self, request: HttpRequest, queryset: QuerySet[Game]) -> None:
         """Admin action to start a new scenario 1 game"""
         self._start_new_game(
             request,
@@ -104,9 +106,9 @@ class GameAdmin(admin.ModelAdmin):
             RemoteGame,
         )
 
-    start_scenario_1.short_description = "Start new Scenario 1 game"
+    start_scenario_1.short_description = "Start new Scenario 1 game"  # type: ignore [attr-defined]
 
-    def start_scenario_2(self, request, queryset):
+    def start_scenario_2(self, request: HttpRequest, queryset: QuerySet[Game]) -> None:
         """Admin action to start a new scenario 2 game"""
         self._start_new_game(
             request,
@@ -114,9 +116,9 @@ class GameAdmin(admin.ModelAdmin):
             RemoteGame,
         )
 
-    start_scenario_2.short_description = "Start new Scenario 2 game"
+    start_scenario_2.short_description = "Start new Scenario 2 game"  # type: ignore [attr-defined]
 
-    def start_scenario_3(self, request, queryset):
+    def start_scenario_3(self, request: HttpRequest, queryset: QuerySet[Game]) -> None:
         """Admin action to start a new scenario 3 game"""
         self._start_new_game(
             request,
@@ -124,27 +126,35 @@ class GameAdmin(admin.ModelAdmin):
             RemoteGame,
         )
 
-    start_scenario_3.short_description = "Start new Scenario 3 game"
+    start_scenario_3.short_description = "Start new Scenario 3 game"  # type: ignore [attr-defined]
 
-    def start_local_scenario_1(self, request, queryset):
+    def start_local_scenario_1(
+        self, request: HttpRequest, queryset: QuerySet[Game]
+    ) -> None:
         """Admin action to start a new local scenario 1 game"""
         self._start_new_game(request, 1, LocalGame)
 
-    start_local_scenario_1.short_description = "Start new LOCAL Scenario 1 game"
+    start_local_scenario_1.short_description = "Start new LOCAL Scenario 1 game"  # type: ignore [attr-defined]
 
-    def start_local_scenario_2(self, request, queryset):
+    def start_local_scenario_2(
+        self, request: HttpRequest, queryset: QuerySet[Game]
+    ) -> None:
         """Admin action to start a new local scenario 2 game"""
         self._start_new_game(request, 2, LocalGame)
 
-    start_local_scenario_2.short_description = "Start new LOCAL Scenario 2 game"
+    start_local_scenario_2.short_description = "Start new LOCAL Scenario 2 game"  # type: ignore [attr-defined]
 
-    def start_local_scenario_3(self, request, queryset):
+    def start_local_scenario_3(
+        self, request: HttpRequest, queryset: QuerySet[Game]
+    ) -> None:
         """Admin action to start a new local scenario 3 game"""
         self._start_new_game(request, 3, LocalGame)
 
-    start_local_scenario_3.short_description = "Start new LOCAL Scenario 3 game"
+    start_local_scenario_3.short_description = "Start new LOCAL Scenario 3 game"  # type: ignore [attr-defined]
 
-    def _start_new_game(self, request, scenario, game_class: Type[Game]):
+    def _start_new_game(
+        self, request: HttpRequest, scenario: int, game_class: type[Game]
+    ) -> None:
         """Helper method to start a new remote game and show appropriate messages"""
         try:
             game = game_class.start_new_game(scenario)
@@ -162,23 +172,23 @@ class GameAdmin(admin.ModelAdmin):
                 request, f"Failed to start Scenario {scenario} game: {str(e)}"
             )
 
-    def view_people(self, obj):
+    def view_people(self, obj: Game) -> SafeString:
         """Create a link to view people for this specific game"""
         url = reverse("admin:bouncer_person_changelist") + f"?game__id__exact={obj.id}"
         return format_html('<a href="{}">View People ({})</a>', url, obj.people.count())
 
-    view_people.short_description = "People"
+    view_people.short_description = "People"  # type: ignore [attr-defined]
 
-    def view_on_challenge_site(self, obj):
+    def view_on_challenge_site(self, obj: Game) -> str | SafeString:
         """Create a link to view this game on the challenge site"""
         if isinstance(obj, LocalGame):
             return "N/A"
         url = f"https://berghain.challenges.listenlabs.ai/game/{obj.game_id}"
         return format_html('<a href="{}" target="_blank">View Live Game</a>', url)
 
-    view_on_challenge_site.short_description = "Challenge Site"
+    view_on_challenge_site.short_description = "Challenge Site"  # type: ignore [attr-defined]
 
-    def has_add_permission(self, request):
+    def has_add_permission(self, request: HttpRequest) -> bool:
         """Disable manual game creation - games should be created via start_new_game"""
         return False
 
@@ -195,13 +205,13 @@ class PersonAdmin(admin.ModelAdmin):
     ordering = ["game", "person_index"]
     actions = ["accept_person", "reject_person"]
 
-    def attributes_summary(self, obj):
+    def attributes_summary(self, obj: Person) -> str:
         """Display a summary of the person's attributes"""
         return ", ".join(key for key, value in obj.attributes.items() if value)
 
-    attributes_summary.short_description = "Attributes"
+    attributes_summary.short_description = "Attributes"  # type: ignore [attr-defined]
 
-    def accept_person(self, request, queryset):
+    def accept_person(self, request: HttpRequest, queryset: QuerySet[Person]) -> None:
         """Admin action to accept selected pending people"""
         accepted = 0
         errors = 0
@@ -221,9 +231,9 @@ class PersonAdmin(admin.ModelAdmin):
         if errors:
             messages.warning(request, f"{errors} people could not be processed")
 
-    accept_person.short_description = "Accept selected pending people"
+    accept_person.short_description = "Accept selected pending people"  # type: ignore [attr-defined]
 
-    def reject_person(self, request, queryset):
+    def reject_person(self, request: HttpRequest, queryset: QuerySet[Person]) -> None:
         """Admin action to reject selected pending people"""
         rejected = 0
         errors = 0
@@ -243,7 +253,7 @@ class PersonAdmin(admin.ModelAdmin):
         if errors:
             messages.warning(request, f"{errors} people could not be processed")
 
-    reject_person.short_description = "Reject selected pending people"
+    reject_person.short_description = "Reject selected pending people"  # type: ignore [attr-defined]
 
     class Media:
         css = {"all": ("admin/css/auto_width_columns.css",)}
