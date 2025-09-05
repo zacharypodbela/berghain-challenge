@@ -8,7 +8,7 @@ from typing import Any
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from bouncer.algorithms import ALGORITHMS, AlgorithmFunc, get_algorithm
-from bouncer.models import Game, LocalGame
+from bouncer.models import Game, LocalGame, RemoteGame
 
 
 class Command(BaseCommand):
@@ -30,7 +30,14 @@ class Command(BaseCommand):
             "--n-games",
             type=int,
             default=1,
-            help="Run N new LocalGame episodes (requires --scenario).",
+            help="Run algorithm on N new Games (requires --scenario). Will use LocalGame unless --server flag is passed.",
+        )
+        parser.add_argument(
+            "--server",
+            action="store_true",
+            help=(
+                "Use RemoteGame (server API) when starting new game with --scenario."
+            ),
         )
         parser.add_argument(
             "--algorithm",
@@ -53,6 +60,7 @@ class Command(BaseCommand):
     def handle(self, *args: Any, **options: Any) -> None:
         game_id = options["game_id"]
         scenario = options.get("scenario")
+        use_server = bool(options.get("server"))
         n_games = int(options.get("n_games") or 1)
         algorithm_name = options["algorithm"]
         delay = options["delay"]
@@ -61,6 +69,8 @@ class Command(BaseCommand):
         # Validate scenario/game-id combinations
         if game_id and scenario:
             raise CommandError("Provide either --game-id or --scenario, not both.")
+        if use_server and not scenario:
+            raise CommandError("--server can only be used with --scenario.")
         if n_games != 1 and (game_id or not scenario):
             raise CommandError("--n-games can only be used with --scenario.")
 
@@ -68,11 +78,14 @@ class Command(BaseCommand):
         if scenario:
             # Start one or more new LocalGame episodes for the given scenario
             for _i in range(n_games):
-                g = LocalGame.start_new_game(int(scenario))
+                if use_server:
+                    g = RemoteGame.start_new_game(int(scenario))
+                else:
+                    g = LocalGame.start_new_game(int(scenario))
                 games_to_run.append(g)
                 self.stdout.write(
                     self.style.SUCCESS(
-                        f"Created LocalGame {g.game_id} for scenario {g.scenario}"
+                        f"Created {'RemoteGame' if use_server else 'LocalGame'} {g.game_id} for scenario {g.scenario}"
                     )
                 )
         else:
