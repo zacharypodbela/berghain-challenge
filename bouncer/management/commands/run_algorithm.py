@@ -8,7 +8,7 @@ from typing import Any
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from bouncer.algorithms import ALGORITHMS, get_algorithm
-from bouncer.models import Game
+from bouncer.models import Game, LocalGame
 
 
 class Command(BaseCommand):
@@ -19,6 +19,18 @@ class Command(BaseCommand):
             "--game-id",
             type=str,
             help="Game ID to run algorithm on (if not provided, will ask for input)",
+        )
+        parser.add_argument(
+            "--scenario",
+            type=int,
+            choices=[1, 2, 3],
+            help="If provided (and no --game-id), start a new LocalGame for this scenario and run bouncer algorithm on that.",
+        )
+        parser.add_argument(
+            "--n-games",
+            type=int,
+            default=1,
+            help="Run N new LocalGame episodes (requires --scenario).",
         )
         parser.add_argument(
             "--algorithm",
@@ -34,28 +46,61 @@ class Command(BaseCommand):
 
     def handle(self, *args: Any, **options: Any) -> None:
         game_id = options["game_id"]
+        scenario = options.get("scenario")
+        n_games = options.get("n_games")
         algorithm_name = options["algorithm"]
         delay = options["delay"]
 
-        # Get game ID from user if not provided
-        if not game_id:
-            self.stdout.write("\nAvailable games:")
-            games = Game.objects.all().order_by("-created_at")
-            for game in games[:10]:  # Show latest 10 games
-                status_color = self.get_status_color(game.status)
-                if status_color:
-                    status_text = status_color(game.status)
-                else:
-                    status_text = game.status
-                self.stdout.write(
-                    f"  {game.game_id} (Scenario {game.scenario}, "
-                    f"Status: {status_text}, "
-                    f"People: {game.people.count()})"
-                )
+        # Validate scenario/game-id combinations
+        if game_id and scenario:
+            raise CommandError("Provide either --game-id or --scenario, not both.")
+        if n_games != 1 and (game_id or not scenario):
+            raise CommandError("--n-games can only be used with --scenario.")
 
-            game_id = input("\nEnter game ID to run algorithm on: ").strip()
+        games_to_run: list[Game] = []
+        if scenario:
+            # Start one or more new LocalGame episodes for the given scenario
+            for _i in range(n_games):
+                g = LocalGame.start_new_game(int(scenario))
+                games_to_run.append(g)
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f"Created LocalGame {g.game_id} for scenario {g.scenario}"
+                    )
+                )
+        else:
+            # Get game ID from user if not provided
             if not game_id:
-                raise CommandError("No game ID provided")
+                self.stdout.write("\nAvailable games:")
+                games = (
+                    Game.objects.filter(status="running").all().order_by("-created_at")
+                )
+                for game in games[:10]:  # Show latest 10 games
+                    status_color = self.get_status_color(game.status)
+                    if status_color:
+                        status_text = status_color(game.status)
+                    else:
+                        status_text = game.status
+                    self.stdout.write(
+                        f"  {game.game_id} (Scenario {game.scenario}, "
+                        f"Status: {status_text}, "
+                        f"People: {game.people.count()})"
+                    )
+
+                game_id = input("\nEnter game ID to run algorithm on: ").strip()
+                if not game_id:
+                    raise CommandError("No game ID provided")
+
+            # Get and validate single game
+            try:
+                game = Game.objects.get(game_id=game_id)
+                if game.status != "running":
+                    raise CommandError(
+                        f'Game "{game_id}" has status "{game.status}" - can only run on "running" games'
+                    )
+            except Game.DoesNotExist as e:
+                raise CommandError(f'Game "{game_id}" does not exist') from e
+            games_to_run.append(game)
 
         # Get algorithm from user if not provided
         if not algorithm_name:
@@ -67,40 +112,41 @@ class Command(BaseCommand):
             if not algorithm_name:
                 raise CommandError("No algorithm provided")
 
-        # Get and validate game
-        try:
-            game = Game.objects.get(game_id=game_id)
-        except Game.DoesNotExist as e:
-            raise CommandError(f'Game "{game_id}" does not exist') from e
-
         # Get algorithm
         try:
             algorithm = get_algorithm(algorithm_name)
         except ValueError as e:
             raise CommandError(str(e)) from e
 
-        self.stdout.write(
-            f"\n{self.style.SUCCESS('Starting algorithm run:')}\n"
-            f"Game: {game.game_id} (Scenario {game.scenario})\n"
-            f"Algorithm: {algorithm_name}\n"
-            f"Current status: {game.status}\n"
-            f"Current counts - Admitted: {game.admitted_count}, "
-            f"Rejected: {game.rejected_count}, Pending: {game.pending_count}\n"
-        )
+        # Loop over one or more games
+        for idx, game in enumerate(games_to_run, start=1):
+            if len(games_to_run) > 1:
+                self.stdout.write(
+                    self.style.MIGRATE_HEADING(f"\nRun {idx}/{len(games_to_run)}")
+                )
 
-        # Check if we can run on this game
-        if game.status == "completed":
-            raise CommandError("Game is already completed")
-        elif game.status == "failed":
-            raise CommandError("Game has failed - cannot restart")
-        elif game.status == "error":
-            raise CommandError("Game has an error status - cannot restart")
+            self.stdout.write(
+                f"\n{self.style.SUCCESS('Starting algorithm run:')}\n"
+                f"Game: {game.game_id} (Scenario {game.scenario})\n"
+                f"Algorithm: {algorithm_name}\n"
+                f"Current status: {game.status}\n"
+                f"Current counts - Admitted: {game.admitted_count}, "
+                f"Rejected: {game.rejected_count}, Pending: {game.pending_count}\n"
+            )
 
-        # Handle restart logic
-        self.handle_game_restart(game)
+            # Check if we can run on this game
+            if game.status == "completed":
+                raise CommandError("Game is already completed")
+            elif game.status == "failed":
+                raise CommandError("Game has failed - cannot restart")
+            elif game.status == "error":
+                raise CommandError("Game has an error status - cannot restart")
 
-        # Run the algorithm
-        self.run_algorithm(game, algorithm, delay)
+            # Handle restart logic
+            self.handle_game_restart(game)
+
+            # Run the algorithm
+            self.run_algorithm(game, algorithm, delay)
 
     def get_status_color(self, status: str) -> Any | None:
         """Get color styling for game status"""
