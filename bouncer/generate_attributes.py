@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy.optimize import minimize
 from scipy.special import logsumexp
 
@@ -19,11 +20,11 @@ class SamplerParams:
     bit_index: dict[str, int]  # {"berlin_local":0, "creative":1, ...}
 
     # Exact joint over 2^K states in this bit order
-    probs: np.ndarray  # shape (2**K,), sum == 1
+    probs: NDArray[np.float64]  # shape (2**K,), sum == 1
 
     # Vose alias sampler tables for O(1) sampling
-    alias_prob: np.ndarray  # shape (2**K,)
-    alias_alias: np.ndarray  # shape (2**K,), dtype=int
+    alias_prob: NDArray[np.float64]  # shape (2**K,)
+    alias_alias: NDArray[np.int32]  # shape (2**K,), dtype=int
 
     # Optional diagnostics (helpful in tests, ignored at runtime)
     achieved_marginals: dict[str, float]
@@ -33,13 +34,13 @@ class SamplerParams:
 # ---------- Helpers: states, features, alias sampler ----------
 
 
-def _enumerate_states(K: int) -> np.ndarray:
+def _enumerate_states(K: int) -> NDArray[np.uint8]:
     """
     Return all 2^K binary states as an array of shape (2^K, K), dtype=uint8.
     Row s is the bit-decomposition of s with LSB = attribute 0.
     """
     S = 1 << K
-    states = np.zeros((S, K), dtype=np.uint8)
+    states: NDArray[np.uint8] = np.zeros((S, K), dtype=np.uint8)
     for s in range(S):
         for k in range(K):
             states[s, k] = (s >> k) & 1
@@ -51,15 +52,15 @@ def _pair_index_list(K: int) -> list[tuple[int, int]]:
 
 
 def _build_feature_matrix(
-    states: np.ndarray,
-) -> tuple[np.ndarray, list[tuple[int, int]]]:
+    states: NDArray[np.uint8],
+) -> tuple[NDArray[np.float64], list[tuple[int, int]]]:
     """
     Feature vector T(x) = [x_0,...,x_{K-1}, x_0x_1, x_0x_2, ..., x_{K-2}x_{K-1}]
     Returns (F, pairs) where F shape is (2^K, K + K*(K-1)//2).
     """
     S, K = states.shape
     pairs = _pair_index_list(K)
-    F = np.empty((S, K + len(pairs)), dtype=np.float64)
+    F: NDArray[np.float64] = np.empty((S, K + len(pairs)), dtype=np.float64)
     # singleton features
     F[:, :K] = states
     # pair features
@@ -68,7 +69,9 @@ def _build_feature_matrix(
     return F, pairs
 
 
-def _build_alias(probs: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _build_alias(
+    probs: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.int32]]:
     """
     Vose alias method: returns (alias_prob, alias_alias).
     Each sample: k = randint(n); return k if rand() < alias_prob[k] else alias_alias[k].
@@ -78,8 +81,8 @@ def _build_alias(probs: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     n = p.size
     scaled = p * n
 
-    prob = np.zeros(n, dtype=np.float64)
-    alias = np.zeros(n, dtype=np.int32)
+    prob: NDArray[np.float64] = np.zeros(n, dtype=np.float64)
+    alias: NDArray[np.int32] = np.zeros(n, dtype=np.int32)
 
     small = [i for i in range(n) if scaled[i] < 1.0]
     large = [i for i in range(n) if scaled[i] >= 1.0]
@@ -104,10 +107,14 @@ def _build_alias(probs: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _sample_alias(
-    alias_prob: np.ndarray, alias_alias: np.ndarray, n: int, rng: np.random.Generator
-) -> np.ndarray:
+    alias_prob: NDArray[np.float64],
+    alias_alias: NDArray[np.int32],
+    n: int,
+    rng: np.random.Generator,
+) -> NDArray[np.int32]:
     k = alias_prob.size
-    idx = rng.integers(0, k, size=n, endpoint=False)
+    idx_raw = rng.integers(0, k, size=n, endpoint=False)
+    idx: NDArray[np.int32] = idx_raw.astype(np.int32, copy=False)
     u = rng.random(n)
     take_alias = u >= alias_prob[idx]
     idx[take_alias] = alias_alias[idx[take_alias]]
@@ -134,9 +141,9 @@ def _frechet_bounds(p_i: float, p_j: float) -> tuple[float, float]:
 
 
 def _target_moment_vector(
-    p: np.ndarray,
-    phi: np.ndarray,  # φ_ij for i!=j, diagonal ignored/zero
-) -> tuple[np.ndarray, list[tuple[int, int]], np.ndarray]:
+    p: NDArray[np.float64],
+    phi: NDArray[np.float64],  # φ_ij for i!=j, diagonal ignored/zero
+) -> tuple[NDArray[np.float64], list[tuple[int, int]], NDArray[np.float64]]:
     """
     From marginals p[i] and binary correlations φ_ij, build the target μ vector:
        μ = [ E[x_i], E[x_i x_j] ] in the same order as _build_feature_matrix().
@@ -144,13 +151,13 @@ def _target_moment_vector(
     """
     K = p.size
     pairs = _pair_index_list(K)
-    mu = np.empty(K + len(pairs), dtype=np.float64)
+    mu: NDArray[np.float64] = np.empty(K + len(pairs), dtype=np.float64)
 
     # Singletons
     mu[:K] = p
 
     # Pairwise E[x_i x_j]
-    p_ij = np.zeros((K, K), dtype=np.float64)
+    p_ij: NDArray[np.float64] = np.zeros((K, K), dtype=np.float64)
     for i, j in pairs:
         # Convert φ to P11
         var_i = p[i] * (1 - p[i])
@@ -171,8 +178,8 @@ def _target_moment_vector(
 
 
 def _moments_from_probs(
-    probs: np.ndarray, states: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
+    probs: NDArray[np.float64], states: NDArray[np.uint8]
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """
     Compute E[x_i] and E[x_i x_j] from the full joint.
     Returns (p, p_ij) with shapes (K,) and (K,K).
@@ -180,9 +187,9 @@ def _moments_from_probs(
     probs = probs / probs.sum()
     S, K = states.shape
     # E[x_i]
-    p = probs @ states  # (K,)
+    p: NDArray[np.float64] = probs @ states  # (K,)
     # E[x_i x_j]
-    p_ij = np.zeros((K, K), dtype=np.float64)
+    p_ij: NDArray[np.float64] = np.zeros((K, K), dtype=np.float64)
     for i in range(K):
         for j in range(i, K):
             val = np.dot(probs, states[:, i] * states[:, j])
@@ -192,7 +199,7 @@ def _moments_from_probs(
 
 
 def _phi_matrix_from_p_and_pij(
-    p: np.ndarray, p_ij: np.ndarray, attrs: list[str]
+    p: NDArray[np.float64], p_ij: NDArray[np.float64], attrs: list[str]
 ) -> dict[str, dict[str, float]]:
     phi = {}
     for i, ai in enumerate(attrs):
@@ -220,11 +227,11 @@ def generate_probability_vectors(attribute_statistics: dict[str, Any]) -> Sample
     K = len(attributes)
 
     # 2) Targets: p (marginals) and φ (binary correlations)
-    p = np.array(
+    p: NDArray[np.float64] = np.array(
         [attribute_statistics["relativeFrequencies"][a] for a in attributes],
         dtype=np.float64,
     )
-    phi = np.zeros((K, K), dtype=np.float64)
+    phi: NDArray[np.float64] = np.zeros((K, K), dtype=np.float64)
     for i, ai in enumerate(attributes):
         row = attribute_statistics["correlations"][ai]
         for j, aj in enumerate(attributes):
@@ -236,16 +243,16 @@ def generate_probability_vectors(attribute_statistics: dict[str, Any]) -> Sample
     mu, pairs, p_ij_target = _target_moment_vector(p, phi)
 
     # 4) Precompute feature matrix over all 2^K states
-    states = _enumerate_states(K)  # (S,K)
+    states: NDArray[np.uint8] = _enumerate_states(K)  # (S,K)
     F, _ = _build_feature_matrix(states)  # (S,M)
     S, M = F.shape
 
     # 5) Convex dual objective: f(θ) = log Z(θ) - μ·θ, ∇ = Eθ[T] - μ
-    def objective(theta: np.ndarray) -> tuple[float, np.ndarray]:
+    def objective(theta: NDArray[np.float64]) -> tuple[float, NDArray[np.float64]]:
         Fx = F @ theta  # (S,)
         logZ = logsumexp(Fx)
         probs = np.exp(Fx - logZ)  # softmax
-        Et = probs @ F  # (M,)
+        Et: NDArray[np.float64] = probs @ F  # (M,)
         f = logZ - float(mu @ theta)
         g = Et - mu
         return f, g
@@ -253,7 +260,7 @@ def generate_probability_vectors(attribute_statistics: dict[str, Any]) -> Sample
     # 6) Initialize parameters: b_i ≈ logit(p_i), W_ij = 0
     eps = 1e-9
     logits = np.log(np.clip(p, eps, 1 - eps)) - np.log(np.clip(1 - p, eps, 1 - eps))
-    theta0 = np.zeros(M, dtype=np.float64)
+    theta0: NDArray[np.float64] = np.zeros(M, dtype=np.float64)
     theta0[:K] = logits  # good warm start
 
     # 7) Optimize
@@ -265,10 +272,10 @@ def generate_probability_vectors(attribute_statistics: dict[str, Any]) -> Sample
         options={"maxiter": 2000, "ftol": 1e-12, "gtol": 1e-8},
     )
 
-    theta = res.x
+    theta: NDArray[np.float64] = res.x
 
     # 8) Final joint and diagnostics
-    Fx = F @ theta
+    Fx: NDArray[np.float64] = F @ theta
     logZ = logsumexp(Fx)
     probs = np.exp(Fx - logZ)  # (S,)
 

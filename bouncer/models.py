@@ -7,7 +7,7 @@ from django.utils import timezone
 from polymorphic.models import PolymorphicModel
 
 from bouncer.constants import CAPACITY, REJECTION_LIMIT
-from bouncer.math import CorrelatedAttributeGenerator
+from bouncer.generate_attributes import CorrelatedAttributeGenerator
 
 from . import remote_api
 

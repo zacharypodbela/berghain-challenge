@@ -4,6 +4,7 @@ from typing import Any
 
 import numpy as np
 from django.test import TestCase
+from numpy.typing import NDArray
 
 import bouncer.models as models_mod
 import bouncer.rl.env as env_mod
@@ -199,7 +200,7 @@ class BaseEnvMixin:
 
             env = self.ENV_CLS(scenario=1, seed=246)
             env.reset(seed=246)
-            last_obs: np.ndarray | None = None
+            last_obs: NDArray[np.float32] | None = None
             for _ in range(5):
                 obs, _, term, _, _ = env.step(0)
                 if term:

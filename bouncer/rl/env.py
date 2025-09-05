@@ -6,9 +6,10 @@ from typing import Any, cast
 import numpy as np
 from gymnasium import Env, spaces
 from gymnasium.spaces import Space
+from numpy.typing import NDArray
 
 from bouncer.constants import CAPACITY, REJECTION_LIMIT, SCENARIO_CONFIGS
-from bouncer.math import CorrelatedAttributeGenerator
+from bouncer.generate_attributes import CorrelatedAttributeGenerator
 from bouncer.models import LocalGame, Person
 
 # Fixed union attribute order across all scenarios (see RL.md)
@@ -28,7 +29,7 @@ ATTRIBUTE_ORDER: list[str] = [
 ]
 
 
-def _one_hot_scenario(scenario: int) -> np.ndarray:
+def _one_hot_scenario(scenario: int) -> NDArray[np.float32]:
     vec = np.zeros(3, dtype=np.float32)
     if 1 <= scenario <= 3:
         vec[scenario - 1] = 1.0
@@ -43,11 +44,11 @@ class EpisodeResult(Enum):
     FAILED = "failed"
 
 
-class AbstractBerghainEnv(Env[np.ndarray, int]):
+class AbstractBerghainEnv(Env[NDArray[np.float32], int]):
     """Template-method Env sharing all logic; backends provide person sourcing and status."""
 
     action_space: Space[int]
-    observation_space: Space[np.ndarray]
+    observation_space: Space[Any]
 
     # Shared episode state
     scenario: int
@@ -91,7 +92,7 @@ class AbstractBerghainEnv(Env[np.ndarray, int]):
     # Gymnasium interface -------------------------------------------------
     def reset(
         self, seed: int | None = None, options: dict[str, Any] | None = None
-    ) -> tuple[np.ndarray, dict[str, Any]]:
+    ) -> tuple[NDArray[np.float32], dict[str, Any]]:
         # Clear counters
         self.admitted = 0
         self.rejected = 0
@@ -106,7 +107,9 @@ class AbstractBerghainEnv(Env[np.ndarray, int]):
 
         return self._build_observation(), {}
 
-    def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
+    def step(
+        self, action: int
+    ) -> tuple[NDArray[np.float32], float, bool, bool, dict[str, Any]]:
         if self._current_attrs is None:
             raise RuntimeError("Environment must be reset() before step().")
 
@@ -166,7 +169,7 @@ class AbstractBerghainEnv(Env[np.ndarray, int]):
         return self._build_observation(), reward, False, truncated, info
 
     # Helpers -------------------------------------------------------------
-    def _build_observation(self) -> np.ndarray:
+    def _build_observation(self) -> NDArray[np.float32]:
         assert self._current_attrs is not None
 
         s = _one_hot_scenario(self.scenario)
@@ -219,12 +222,14 @@ class DbBerghainEnv(AbstractBerghainEnv):
 
     def reset(
         self, seed: int | None = None, options: dict[str, Any] | None = None
-    ) -> tuple[np.ndarray, dict[str, Any]]:
+    ) -> tuple[NDArray[np.float32], dict[str, Any]]:
         self.game = LocalGame.start_new_game(self.scenario)
         self._db_person = Person.objects.get(game=self.game, decision__isnull=True)
         return super().reset(seed=seed, options=options)
 
-    def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
+    def step(
+        self, action: int
+    ) -> tuple[NDArray[np.float32], float, bool, bool, dict[str, Any]]:
         assert self.game is not None and self._db_person is not None, (
             "Environment must be reset() before step()."
         )
@@ -249,7 +254,7 @@ class SimBerghainEnv(AbstractBerghainEnv):
 
     def reset(
         self, seed: int | None = None, options: dict[str, Any] | None = None
-    ) -> tuple[np.ndarray, dict[str, Any]]:
+    ) -> tuple[NDArray[np.float32], dict[str, Any]]:
         # Pre-generate a large pool of people for this episode
         self._precomputed_people = self._person_attr_generator.sample(
             CAPACITY + REJECTION_LIMIT, seed=seed

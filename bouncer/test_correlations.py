@@ -4,7 +4,7 @@ from typing import Any
 import numpy as np
 
 import bouncer.constants as consts
-from bouncer.math import CorrelatedAttributeGenerator
+from bouncer.generate_attributes import CorrelatedAttributeGenerator
 from bouncer.models import Game
 
 
