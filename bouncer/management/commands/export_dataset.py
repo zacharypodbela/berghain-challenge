@@ -71,11 +71,7 @@ class Command(BaseCommand):
 
         obs_list: list[NDArray[np.float32]] = []
         actions_list: list[int] = []
-        scenarios_list: list[int] = []
         episodes_list: list[int] = []
-        episode_game_ids: list[str] = []
-        helpful_list: list[int] = []  # 1/0
-        episode_statuses: list[str] = []
 
         episode_idx = 0
         total_steps = 0
@@ -114,34 +110,18 @@ class Command(BaseCommand):
                 obs_list.append(obs)
                 act = 1 if bool(decision) else 0
                 actions_list.append(act)
-                scenarios_list.append(int(game.scenario))
                 episodes_list.append(episode_idx)
 
-                # Helpful label: deficit strictly decreases on accept
-                helpful = 0
+                # Apply state updates based on the decision
                 if act == 1:
-                    before = sum(
-                        max(0, int(min_counts[a]) - int(accepted_attr_counts[a]))
-                        for a in ATTRIBUTE_ORDER
-                    )
-                    # Apply accept updates
                     admitted += 1
                     for a in ATTRIBUTE_ORDER:
                         if bool(attrs.get(a, False)):
                             accepted_attr_counts[a] += 1
-                    after = sum(
-                        max(0, int(min_counts[a]) - int(accepted_attr_counts[a]))
-                        for a in ATTRIBUTE_ORDER
-                    )
-                    helpful = 1 if after < before else 0
                 else:
                     rejected += 1
-
-                helpful_list.append(helpful)
                 total_steps += 1
 
-            episode_game_ids.append(str(game.game_id))
-            episode_statuses.append(str(game.status))
             episode_idx += 1
 
         if not obs_list:
@@ -149,21 +129,13 @@ class Command(BaseCommand):
 
         obs_arr = np.stack(obs_list).astype(np.float32)
         actions_arr = np.array(actions_list, dtype=np.int64)
-        scenarios_arr = np.array(scenarios_list, dtype=np.int64)
         episodes_arr = np.array(episodes_list, dtype=np.int64)
-        episode_game_ids_arr = np.array(episode_game_ids)
-        episode_statuses_arr = np.array(episode_statuses)
-        helpful_arr = np.array(helpful_list, dtype=np.int8)
 
         np.savez_compressed(
             out_path,
             obs=obs_arr,
             actions=actions_arr,
-            scenarios=scenarios_arr,
             episodes=episodes_arr,
-            episode_game_ids=episode_game_ids_arr,
-            episode_statuses=episode_statuses_arr,
-            helpful=helpful_arr,
         )
 
         self.stdout.write(
