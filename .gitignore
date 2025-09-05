@@ -58,3 +58,6 @@ MANIFEST
 
 # Logs
 *.log
+
+# Model Runs
+runs/

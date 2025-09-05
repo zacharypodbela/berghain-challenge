@@ -8,7 +8,10 @@ on people trying to get into the nightclub.
 from collections.abc import Callable
 from typing import TextIO
 
+from stable_baselines3 import PPO
+
 from bouncer.models import Game, Person
+from bouncer.rl.env import ATTRIBUTE_ORDER, build_observation_vector
 
 
 def too_nice_bouncer(person: Person, game: Game, stdout: TextIO | None) -> bool:
@@ -278,6 +281,41 @@ def chat_gpt_bouncer(person: Person, game: Game, stdout: TextIO | None) -> bool:
     return accept
 
 
+# TODO: Enhance the Django command so we can specify a model path when running.
+# Its fine to just hard code it for now.
+PPO_MODEL_PATH = "runs/ppo_s1_v1/best/best_model.zip"
+
+
+def ppo_bouncer(person: Person, game: Game, stdout: TextIO | None) -> bool:
+    """Use a saved Stable-Baselines3 PPO policy to decide."""
+    model: PPO = PPO.load(PPO_MODEL_PATH)
+
+    # Build observation vector from Game state
+    admitted = int(game.admitted_count)
+    rejected = int(game.rejected_count)
+    constraints = {c["attribute"]: int(c["minCount"]) for c in game.constraints}
+    min_counts = {a: int(constraints.get(a, 0)) for a in ATTRIBUTE_ORDER}
+    accepted_attr_counts: dict[str, int] = {}
+    for attr in ATTRIBUTE_ORDER:
+        accepted_attr_counts[attr] = game.people.filter(
+            decision=True, **{f"attributes__{attr}": True}
+        ).count()
+
+    obs = build_observation_vector(
+        scenario=int(game.scenario),
+        admitted=admitted,
+        rejected=rejected,
+        min_counts=min_counts,
+        accepted_attr_counts=accepted_attr_counts,
+        current_attrs=person.attributes,
+    )
+
+    # Give the model the observation vector and ask for next action
+    action, _ = model.predict(obs, deterministic=True)
+    # Action space is Discrete(2): 1 = accept, 0 = reject
+    return bool(int(action) == 1)
+
+
 # Registry of available algorithms
 AlgorithmFunc = Callable[[Person, Game, TextIO | None], bool]
 ALGORITHMS: dict[str, AlgorithmFunc] = {
@@ -285,6 +323,7 @@ ALGORITHMS: dict[str, AlgorithmFunc] = {
     "so_mean_bouncer": so_mean_bouncer,
     "optimal_markov_bouncer": optimal_markov_bouncer,
     "chat_gpt_bouncer": chat_gpt_bouncer,
+    "ppo_bouncer": ppo_bouncer,
 }
 
 

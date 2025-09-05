@@ -36,6 +36,60 @@ def _one_hot_scenario(scenario: int) -> NDArray[np.float32]:
     return vec
 
 
+def build_observation_vector(
+    *,
+    scenario: int,
+    admitted: int,
+    rejected: int,
+    min_counts: dict[str, int],
+    accepted_attr_counts: dict[str, int],
+    current_attrs: dict[str, bool],
+) -> NDArray[np.float32]:
+    """Construct the 31-dim observation vector used by both env and wrappers.
+
+    Fields: [one-hot scenario(3), admitted_frac, remaining_frac, rejection_pressure,
+    slack_frac, for each attr in ATTRIBUTE_ORDER: (curr_bit, remain_need_frac)].
+    """
+    s = _one_hot_scenario(scenario)
+    admitted_frac = float(admitted) / float(CAPACITY)
+    remaining_abs = CAPACITY - admitted
+    remaining_frac = float(remaining_abs) / float(CAPACITY)
+    rejection_pressure = float(rejected) / float(REJECTION_LIMIT)
+
+    remain_need_fracs: list[float] = []
+    deficits_abs_total = 0
+    for attr in ATTRIBUTE_ORDER:
+        min_c = int(min_counts.get(attr, 0))
+        accepted_c = int(accepted_attr_counts.get(attr, 0))
+        deficit_abs = max(0, min_c - accepted_c)
+        deficits_abs_total += deficit_abs
+        remain_need_fracs.append(float(deficit_abs) / float(CAPACITY))
+
+    slack_frac = float(max(0, remaining_abs - deficits_abs_total)) / float(CAPACITY)
+
+    curr_bits: list[float] = []
+    for attr in ATTRIBUTE_ORDER:
+        curr_bits.append(1.0 if bool(current_attrs.get(attr, False)) else 0.0)
+
+    pairs: list[float] = []
+    for i in range(len(ATTRIBUTE_ORDER)):
+        pairs.append(curr_bits[i])
+        pairs.append(remain_need_fracs[i])
+
+    obs = np.array(
+        [
+            *list(s),
+            admitted_frac,
+            remaining_frac,
+            rejection_pressure,
+            slack_frac,
+            *pairs,
+        ],
+        dtype=np.float32,
+    )
+    return obs
+
+
 class EpisodeResult(Enum):
     RUNNING = "running"
     SUCCESS = "success"
@@ -105,7 +159,15 @@ class AbstractBerghainEnv(Env[NDArray[np.float32], int]):
             "No people available at start of episode"
         )
 
-        return self._build_observation(), {}
+        obs = build_observation_vector(
+            scenario=self.scenario,
+            admitted=self.admitted,
+            rejected=self.rejected,
+            min_counts=self.min_counts,
+            accepted_attr_counts=self.accepted_attr_counts,
+            current_attrs=self._current_attrs,
+        )
+        return obs, {}
 
     def step(
         self, action: int
@@ -165,51 +227,15 @@ class AbstractBerghainEnv(Env[NDArray[np.float32], int]):
         assert self._current_attrs is not None, (
             "No more people available but episode not terminated"
         )
-
-        return self._build_observation(), reward, False, truncated, info
-
-    # Helpers -------------------------------------------------------------
-    def _build_observation(self) -> NDArray[np.float32]:
-        assert self._current_attrs is not None
-
-        s = _one_hot_scenario(self.scenario)
-        admitted_frac = float(self.admitted) / float(CAPACITY)
-        remaining_abs = CAPACITY - self.admitted
-        remaining_frac = float(remaining_abs) / float(CAPACITY)
-        rejection_pressure = float(self.rejected) / float(REJECTION_LIMIT)
-
-        remain_need_fracs: list[float] = []
-        deficits_abs_total = 0
-        for attr in ATTRIBUTE_ORDER:
-            min_c = self.min_counts.get(attr, 0)
-            accepted_c = self.accepted_attr_counts.get(attr, 0)
-            deficit_abs = max(0, min_c - accepted_c)
-            deficits_abs_total += deficit_abs
-            remain_need_fracs.append(float(deficit_abs) / float(CAPACITY))
-
-        slack_frac = float(max(0, remaining_abs - deficits_abs_total)) / float(CAPACITY)
-
-        curr_bits: list[float] = []
-        for attr in ATTRIBUTE_ORDER:
-            curr_bits.append(1.0 if bool(self._current_attrs.get(attr, False)) else 0.0)
-
-        pairs: list[float] = []
-        for i in range(len(ATTRIBUTE_ORDER)):
-            pairs.append(curr_bits[i])
-            pairs.append(remain_need_fracs[i])
-
-        obs = np.array(
-            [
-                *list(s),
-                admitted_frac,
-                remaining_frac,
-                rejection_pressure,
-                slack_frac,
-                *pairs,
-            ],
-            dtype=np.float32,
+        obs = build_observation_vector(
+            scenario=self.scenario,
+            admitted=self.admitted,
+            rejected=self.rejected,
+            min_counts=self.min_counts,
+            accepted_attr_counts=self.accepted_attr_counts,
+            current_attrs=self._current_attrs,
         )
-        return obs
+        return obs, reward, False, truncated, info
 
 
 class DbBerghainEnv(AbstractBerghainEnv):
