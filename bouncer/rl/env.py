@@ -219,7 +219,9 @@ class AbstractBerghainEnv(Env[NDArray[np.float32], int]):
 
         if terminated:
             if result is EpisodeResult.CONSTRAINTS_UNMET_AT_CAPACITY:
-                reward += -1000.0
+                # Make failing at capacity strictly worse than any plausible
+                # successful run, by penalizing with the full rejection limit.
+                reward += -float(REJECTION_LIMIT)
             return np.zeros((31,), dtype=np.float32), reward, True, truncated, info
 
         # Next person
