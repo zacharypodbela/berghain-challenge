@@ -3,9 +3,11 @@ Django management command to run bouncer algorithms on games
 """
 
 import time
+from datetime import timedelta
 from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
+from django.utils import timezone
 
 from bouncer.algorithms import ALGORITHMS, AlgorithmFunc, get_algorithm
 from bouncer.models import Game, LocalGame, RemoteGame
@@ -95,10 +97,11 @@ class Command(BaseCommand):
             if n_games > 1:
                 self.stdout.write(self.style.MIGRATE_HEADING(f"\nRun {idx}/{n_games}"))
 
-            game: Game = None
             if scenario:
-                # Start one or more new LocalGame episodes for the given scenario
+                # Start one or more new LocalGame/RemoteGame episodes for the given scenario
                 if use_server:
+                    # Respect remote creation limit: max 10 per rolling 15 minutes
+                    self._wait_for_remote_game_capacity()
                     game = RemoteGame.start_new_game(int(scenario))
                 else:
                     game = LocalGame.start_new_game(int(scenario))
@@ -270,3 +273,34 @@ class Command(BaseCommand):
         self.stdout.write(
             f"\nAlgorithm run completed. Decisions made: {decisions_made}"
         )
+
+    def _wait_for_remote_game_capacity(self) -> None:
+        """
+        Ensure fewer than 10 RemoteGames exist in the last 15 minutes.
+        If the cap is reached, sleep until capacity frees up, rechecking on wake.
+        """
+        while True:
+            now = timezone.now()
+            window_start = now - timedelta(minutes=15, seconds=30)  # Add 30s buffer
+            recent_qs = RemoteGame.objects.filter(created_at__gte=window_start)
+            count = int(recent_qs.count())
+            if count < 10:
+                return
+
+            oldest = recent_qs.order_by("created_at").first()
+            if not oldest:
+                # Defensive: if query returns no row unexpectedly, do not block
+                return
+
+            target_time = oldest.created_at + timedelta(minutes=15)
+            wait_seconds = (target_time - now).total_seconds()
+            # Guard against race/clock edge cases
+            wait_seconds = max(1.0, float(wait_seconds))
+
+            self.stdout.write(
+                self.style.WARNING(
+                    "Remote game creation limit reached: "
+                    f"Sleeping {int(wait_seconds)}s until {target_time.isoformat()}"
+                )
+            )
+            time.sleep(wait_seconds)
