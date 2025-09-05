@@ -85,6 +85,7 @@ python manage.py run_algorithm --scenario 3 --algorithm ppo --model-path path/to
 - `--algorithm <str>`: Algorithm to use (see `bouncer/algorithms.py`). If omitted, you will be prompted to choose.
 - `--delay <float>`: Seconds to sleep between decisions (default `0.0`).
 - `--model-path <str>`: Optional model file path for model-based algorithms (e.g., PPO).
+- `--quiet`: Optional flag to silence output with bouncer decisions (the most noise of the logs). You still get notified dof game start, end, run count, errors, etc.
 
 **Notes:**
 

@@ -58,6 +58,11 @@ class Command(BaseCommand):
             default="",
             help="Optional path to a model file for model-based algorithms (e.g., PPO).",
         )
+        parser.add_argument(
+            "--quiet",
+            action="store_true",
+            help=("Suppress output on decisions. Only show core notices and errors."),
+        )
 
     def handle(self, *args: Any, **options: Any) -> None:
         game_id = options["game_id"]
@@ -67,6 +72,7 @@ class Command(BaseCommand):
         algorithm_name = options["algorithm"]
         delay = options["delay"]
         model_path = options.get("model_path")
+        quiet = bool(options.get("quiet"))
 
         # Validate scenario/game-id combinations
         if game_id and scenario:
@@ -166,7 +172,7 @@ class Command(BaseCommand):
             self.handle_game_restart(game)
 
             # Run the algorithm
-            self.run_algorithm(game, algorithm, delay, model_path)
+            self.run_algorithm(game, algorithm, delay, model_path, quiet)
 
     def get_status_color(self, status: str) -> Any | None:
         """Get color styling for game status"""
@@ -202,7 +208,12 @@ class Command(BaseCommand):
             )
 
     def run_algorithm(
-        self, game: Game, algorithm: AlgorithmFunc, delay: float, model_path: str | None
+        self,
+        game: Game,
+        algorithm: AlgorithmFunc,
+        delay: float,
+        model_path: str | None,
+        quiet: bool,
     ) -> None:
         """Run the algorithm on the game until completion or error"""
         decisions_made = 0
@@ -215,21 +226,15 @@ class Command(BaseCommand):
                 .first()
             )
 
-            if not pending_person:
-                self.stdout.write(
-                    f"{self.style.ERROR('No pending people found - updating game status')}"
-                )
-                game.refresh_from_db()
-                break
-
             # Make decision using algorithm
             decision = algorithm(pending_person, game, self.stdout, model_path)
             decision_text = "ACCEPT" if decision else "REJECT"
 
-            self.stdout.write(
-                f"Person #{pending_person.person_index}: {decision_text} "
-                f"(Attributes: {pending_person.attributes})"
-            )
+            if not quiet:
+                self.stdout.write(
+                    f"Person #{pending_person.person_index}: {decision_text} "
+                    f"(Attributes: {pending_person.attributes})"
+                )
 
             try:
                 # Make the API call and update database
@@ -240,10 +245,11 @@ class Command(BaseCommand):
                 game.refresh_from_db()
 
                 # Show updated counts
-                self.stdout.write(
-                    f"  → Counts: Admitted={game.admitted_count}, "
-                    f"Rejected={game.rejected_count}, Pending={game.pending_count}"
-                )
+                if not quiet:
+                    self.stdout.write(
+                        f"  → Counts: Admitted={game.admitted_count}, "
+                        f"Rejected={game.rejected_count}, Pending={game.pending_count}"
+                    )
 
                 # Check if game ended
                 if game.status in ["completed", "failed"]:
