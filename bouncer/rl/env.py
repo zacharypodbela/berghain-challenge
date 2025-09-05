@@ -294,3 +294,88 @@ class SimBerghainEnv(AbstractBerghainEnv):
             "Environment must be reset() before fetching current person."
         )
         return self._precomputed_people.pop(0)
+
+
+class DeficitRewardWrapper(Env[NDArray[np.float32], int]):
+    """Reward shaping: adds positive reward when deficits decrease after an accept.
+
+    Shaping term at step t: coef * (deficits_before - deficits_after), where
+    deficits = sum(max(0, min_count[attr] - accepted_attr_counts[attr])) over attributes.
+    This is potential-based (monotone w.r.t deficits), preserving optimal policy while
+    providing dense feedback.
+    """
+
+    def __init__(
+        self,
+        env: AbstractBerghainEnv,
+        coef: float = 1.0,
+        nonhelp_penalty: float = 0.0,
+        success_bonus: float = 0.0,
+        minmeet_bonus: float = 0.0,
+    ) -> None:
+        self.env = env
+        self.coef = float(coef)
+        self.nonhelp_penalty = float(nonhelp_penalty)
+        self.success_bonus = float(success_bonus)
+        self.minmeet_bonus = float(minmeet_bonus)
+        self.action_space = env.action_space
+        self.observation_space = env.observation_space
+
+    def reset(
+        self, *args: Any, **kwargs: Any
+    ) -> tuple[NDArray[np.float32], dict[str, Any]]:
+        obs, info = self.env.reset(*args, **kwargs)
+        return obs, info
+
+    def step(
+        self, action: int
+    ) -> tuple[NDArray[np.float32], float, bool, bool, dict[str, Any]]:
+        base_env: AbstractBerghainEnv = self.env
+
+        # Compute deficits before (by-attr and total)
+        def _attr_deficit(a: str) -> int:
+            return max(
+                0,
+                int(base_env.min_counts.get(a, 0))
+                - int(base_env.accepted_attr_counts.get(a, 0)),
+            )
+
+        deficits_before_total = 0
+        deficits_before_attr: dict[str, int] = {}
+        for attr in ATTRIBUTE_ORDER:
+            d = _attr_deficit(attr)
+            deficits_before_attr[attr] = d
+            deficits_before_total += d
+
+        obs, reward, terminated, truncated, info = base_env.step(action)
+
+        # Compute deficits after (by-attr and total)
+        deficits_after_total = 0
+        deficits_after_attr: dict[str, int] = {}
+        for attr in ATTRIBUTE_ORDER:
+            d = _attr_deficit(attr)
+            deficits_after_attr[attr] = d
+            deficits_after_total += d
+
+        shaped = reward + self.coef * float(
+            deficits_before_total - deficits_after_total
+        )
+        # Penalize non-helpful accepts while deficits remain
+        if (
+            action == 1
+            and deficits_before_total > 0
+            and deficits_after_total == deficits_before_total
+        ):
+            shaped -= self.nonhelp_penalty
+        # Bonus for meeting any minimum exactly at this step
+        if self.minmeet_bonus != 0.0:
+            met_now = 0
+            for attr in ATTRIBUTE_ORDER:
+                if deficits_before_attr[attr] > 0 and deficits_after_attr[attr] == 0:
+                    met_now += 1
+            if met_now > 0:
+                shaped += self.minmeet_bonus * float(met_now)
+        # Success terminal shaping bonus
+        if terminated and info.get("reason") == EpisodeResult.SUCCESS.value:
+            shaped += self.success_bonus
+        return obs, shaped, terminated, truncated, info
