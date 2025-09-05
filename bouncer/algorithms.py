@@ -5,12 +5,14 @@ This module contains different algorithms for making accept/reject decisions
 on people trying to get into the nightclub.
 """
 
+import math
 from collections.abc import Callable
 from typing import TextIO
 
 from django.core.management.base import CommandError
 from stable_baselines3 import PPO
 
+from bouncer.constants import CAPACITY
 from bouncer.models import Game, Person
 from bouncer.rl.env import ATTRIBUTE_ORDER, build_observation_vector
 
@@ -216,7 +218,7 @@ def _compute_counters(
     return A, B, Y1, W1, N
 
 
-def chat_gpt_bouncer(
+def two_trait_heuristic_bouncer(
     person: Person, game: Game, stdout: TextIO, model_path: str | None
 ) -> bool:
     """
@@ -292,6 +294,58 @@ def chat_gpt_bouncer(
     return accept
 
 
+def deficit_weighted_bouncer(
+    person: Person, game: Game, stdout: TextIO, model_path: str | None
+) -> bool:
+    """Dynamic-overlap heuristic tuned for multi-constraint scenarios.
+
+    If total remaining deficits are D and remaining capacity is S, each admitted person
+    must cover on average D/S needed attributes. Accept only if the current person covers
+    at least ceil(D/S) needed attributes, with feasibility guards.
+    """
+    # Min counts
+    constraints = {c["attribute"]: int(c["minCount"]) for c in game.constraints}
+    min_counts = {a: int(constraints.get(a, 0)) for a in ATTRIBUTE_ORDER}
+
+    # Accepted counts so far
+    accepted_attr_counts: dict[str, int] = {}
+    for attr in ATTRIBUTE_ORDER:
+        accepted_attr_counts[attr] = game.people.filter(
+            decision=True, **{f"attributes__{attr}": True}
+        ).count()
+
+    admitted = int(game.admitted_count)
+    remaining_capacity = max(0, CAPACITY - admitted)
+
+    # Compute deficits and overlap with needed attributes
+    total_deficits = 0
+    deficits: dict[str, int] = {}
+    for attr in ATTRIBUTE_ORDER:
+        need = max(0, min_counts.get(attr, 0) - accepted_attr_counts.get(attr, 0))
+        deficits[attr] = need
+        total_deficits += need
+
+    # If all minima met, admit remaining people
+    if total_deficits == 0:
+        return True
+
+    overlap_needed = 0
+    for attr in ATTRIBUTE_ORDER:
+        if deficits[attr] > 0 and bool(person.attributes.get(attr, False)):
+            overlap_needed += 1
+
+    # Reject if nothing helpful
+    if overlap_needed == 0:
+        return False
+
+    # Required minimum overlap based on average coverage needed
+    if remaining_capacity <= 0:
+        return False
+    avg_needed = float(total_deficits) / float(remaining_capacity)
+    required_k = max(1, math.ceil(avg_needed))
+    return bool(overlap_needed >= required_k)
+
+
 def ppo_bouncer(
     person: Person, game: Game, stdout: TextIO, model_path: str | None
 ) -> bool:
@@ -331,7 +385,8 @@ ALGORITHMS: dict[str, AlgorithmFunc] = {
     "too_nice_bouncer": too_nice_bouncer,
     "so_mean_bouncer": so_mean_bouncer,
     "optimal_markov_bouncer": optimal_markov_bouncer,
-    "chat_gpt_bouncer": chat_gpt_bouncer,
+    "two_trait_heuristic_bouncer": two_trait_heuristic_bouncer,
+    "deficit_weighted_bouncer": deficit_weighted_bouncer,
     "ppo_bouncer": ppo_bouncer,
 }
 
