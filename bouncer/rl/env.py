@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from typing import Any
+from enum import Enum
+from typing import Any, cast
 
 import numpy as np
 from gymnasium import Env, spaces
+from gymnasium.spaces import Space
 
-from bouncer.constants import CAPACITY, REJECTION_LIMIT
+from bouncer.constants import CAPACITY, REJECTION_LIMIT, SCENARIO_CONFIGS
+from bouncer.math import CorrelatedAttributeGenerator
 from bouncer.models import LocalGame, Person
 
 # Fixed union attribute order across all scenarios (see RL.md)
@@ -32,19 +35,37 @@ def _one_hot_scenario(scenario: int) -> np.ndarray:
     return vec
 
 
-class BerghainEnv(Env[np.ndarray, int]):
-    """Gymnasium-compatible environment wrapping LocalGame.
+class EpisodeResult(Enum):
+    RUNNING = "running"
+    SUCCESS = "success"
+    CONSTRAINTS_UNMET_AT_CAPACITY = "constraints_unmet_at_capacity"
+    REJECTION_LIMIT = "rejection_limit"
+    FAILED = "failed"
 
-    Notes:
-        - Requires Django to be initialized (e.g., via manage.py or django.setup()).
-        - Uses in-memory counters for speed; relies on LocalGame for transitions.
-    """
+
+class AbstractBerghainEnv(Env[np.ndarray, int]):
+    """Template-method Env sharing all logic; backends provide person sourcing and status."""
+
+    action_space: Space[int]
+    observation_space: Space[np.ndarray]
+
+    # Shared episode state
+    scenario: int
+    admitted: int
+    rejected: int
+    accepted_attr_counts: dict[str, int]
+    min_counts: dict[str, int]
+    _current_attrs: dict[str, bool] | None
 
     def __init__(self, scenario: int, seed: int | None = None) -> None:
+        if type(self) is AbstractBerghainEnv:
+            raise NotImplementedError(
+                "You should not instantiate AbstractBerghainEnv directly"
+            )
+
         if scenario not in (1, 2, 3):
             raise ValueError("scenario must be one of {1,2,3}")
         self.scenario = scenario
-        self._rng = np.random.default_rng(seed)
 
         # Spaces
         self.action_space = spaces.Discrete(2)  # type: ignore[assignment]
@@ -52,108 +73,108 @@ class BerghainEnv(Env[np.ndarray, int]):
             low=0.0, high=1.0, shape=(31,), dtype=np.float32
         )
 
-        # Episode state
-        self.game: LocalGame | None = None
-        self.current_person: Person | None = None
-        self.admitted: int = 0
-        self.rejected: int = 0
-        # Per-attribute accepted counters
-        self.accepted_attr_counts: dict[str, int] = dict.fromkeys(ATTRIBUTE_ORDER, 0)
-        # Per-attribute minima for this scenario
-        self.min_counts: dict[str, int] = dict.fromkeys(ATTRIBUTE_ORDER, 0)
+        self.admitted = 0
+        self.rejected = 0
+        self.accepted_attr_counts = dict.fromkeys(ATTRIBUTE_ORDER, 0)
+        self.min_counts = dict.fromkeys(ATTRIBUTE_ORDER, 0)
+        self._current_attrs = None
+
+        # Cached constraints for scenario
+        cfg = SCENARIO_CONFIGS[self.scenario]
+        constraints = {c["attribute"]: int(c["minCount"]) for c in cfg["constraints"]}
+        self.min_counts = {a: constraints.get(a, 0) for a in ATTRIBUTE_ORDER}
+
+    # Hooks to be implemented by subclasses --------------------------------
+    def get_curr_person_attrs(self) -> dict[str, bool] | None:
+        raise NotImplementedError
 
     # Gymnasium interface -------------------------------------------------
     def reset(
         self, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[np.ndarray, dict[str, Any]]:
-        if seed is not None:
-            self._rng = np.random.default_rng(seed)
-
-        # Start a fresh local game; first person is created pending
-        self.game = LocalGame.start_new_game(self.scenario)
-
-        # Initialize counters
+        # Clear counters
         self.admitted = 0
         self.rejected = 0
         self.accepted_attr_counts = dict.fromkeys(ATTRIBUTE_ORDER, 0)
+        self._current_attrs = None
 
-        # Build per-attribute minima map from game constraints
-        assert self.game is not None
-        constraints = {
-            c["attribute"]: int(c["minCount"]) for c in self.game.constraints
-        }
-        self.min_counts = {a: constraints.get(a, 0) for a in ATTRIBUTE_ORDER}
+        # First person
+        self._current_attrs = self.get_curr_person_attrs()
+        assert self._current_attrs is not None, (
+            "No people available at start of episode"
+        )
 
-        # Fetch current pending person
-        self.current_person = Person.objects.get(game=self.game, decision__isnull=True)
-
-        obs = self._build_observation()
-        info: dict[str, Any] = {}
-        return obs, info
+        return self._build_observation(), {}
 
     def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
-        if self.game is None or self.current_person is None:
+        if self._current_attrs is None:
             raise RuntimeError("Environment must be reset() before step().")
 
-        # Map action to decision
         accept = bool(action == 1)
-
-        # Reward per step
         reward: float = 0.0 if accept else -1.0
 
-        # Update in-memory counters before committing to DB (for speed)
+        # Update counters
         if accept:
             self.admitted += 1
-            # Update per-attribute accepted counts
-            for attr, has_attr in self.current_person.attributes.items():
-                if has_attr:
-                    # Only count known attributes from the fixed order
-                    if attr in self.accepted_attr_counts:
-                        self.accepted_attr_counts[attr] += 1
+            for attr, has_attr in self._current_attrs.items():
+                if has_attr and attr in self.accepted_attr_counts:
+                    self.accepted_attr_counts[attr] += 1
         else:
             self.rejected += 1
 
-        # Apply decision via LocalGame (updates status and spawns next person if running)
-        _resp = self.current_person.make_decision(accept)
+        # Check if episode is done
+        result = EpisodeResult.RUNNING
+        if self.admitted >= CAPACITY:
+            deficits = 0
+            for attr in ATTRIBUTE_ORDER:
+                min_c = self.min_counts.get(attr, 0)
+                accepted_c = self.accepted_attr_counts.get(attr, 0)
+                deficits += max(0, min_c - accepted_c)
+            if deficits == 0:
+                result = EpisodeResult.SUCCESS
+            else:
+                result = EpisodeResult.CONSTRAINTS_UNMET_AT_CAPACITY
+        if self.rejected >= REJECTION_LIMIT:
+            result = EpisodeResult.REJECTION_LIMIT
 
-        terminated = False
+        terminated = result is not EpisodeResult.RUNNING
         truncated = False
+        # Derive status string for info
+        status_str = (
+            "running"
+            if result is EpisodeResult.RUNNING
+            else ("completed" if result is EpisodeResult.SUCCESS else "failed")
+        )
         info: dict[str, Any] = {
-            "status": self.game.status,
+            "status": status_str,
             "admitted": self.admitted,
             "rejected": self.rejected,
+            "reason": result.value,
         }
 
-        # Terminal handling and bonus/penalty
-        if self.game.status != "running":
-            terminated = True
-            # Add terminal penalty only if capacity reached without meeting constraints
-            if self.game.status == "failed" and self.admitted >= CAPACITY:
+        if terminated:
+            if result is EpisodeResult.CONSTRAINTS_UNMET_AT_CAPACITY:
                 reward += -1000.0
+            return np.zeros((31,), dtype=np.float32), reward, True, truncated, info
 
-            # No next observation when done; return zeros for shape compatibility
-            obs = np.zeros((31,), dtype=np.float32)
-            return obs, reward, terminated, truncated, info
+        # Next person
+        self._current_attrs = self.get_curr_person_attrs()
+        assert self._current_attrs is not None, (
+            "No more people available but episode not terminated"
+        )
 
-        # Still running: fetch next pending person and build observation
-        self.current_person = Person.objects.get(game=self.game, decision__isnull=True)
-        obs = self._build_observation()
-        return obs, reward, terminated, truncated, info
+        return self._build_observation(), reward, False, truncated, info
 
     # Helpers -------------------------------------------------------------
     def _build_observation(self) -> np.ndarray:
-        assert self.game is not None and self.current_person is not None
+        assert self._current_attrs is not None
 
-        # Scenario one-hot
-        s = _one_hot_scenario(self.scenario)  # (3,)
-
-        # Global features
+        s = _one_hot_scenario(self.scenario)
         admitted_frac = float(self.admitted) / float(CAPACITY)
         remaining_abs = CAPACITY - self.admitted
         remaining_frac = float(remaining_abs) / float(CAPACITY)
         rejection_pressure = float(self.rejected) / float(REJECTION_LIMIT)
 
-        # Per-attribute deficits (absolute and fractional)
         remain_need_fracs: list[float] = []
         deficits_abs_total = 0
         for attr in ATTRIBUTE_ORDER:
@@ -165,14 +186,10 @@ class BerghainEnv(Env[np.ndarray, int]):
 
         slack_frac = float(max(0, remaining_abs - deficits_abs_total)) / float(CAPACITY)
 
-        # Per-attribute current bits
         curr_bits: list[float] = []
-        attrs: dict[str, Any] = self.current_person.attributes
         for attr in ATTRIBUTE_ORDER:
-            bit = 1.0 if bool(attrs.get(attr, False)) else 0.0
-            curr_bits.append(bit)
+            curr_bits.append(1.0 if bool(self._current_attrs.get(attr, False)) else 0.0)
 
-        # Interleave per-attribute pairs (curr_bit, remain_need_frac)
         pairs: list[float] = []
         for i in range(len(ATTRIBUTE_ORDER)):
             pairs.append(curr_bits[i])
@@ -190,3 +207,57 @@ class BerghainEnv(Env[np.ndarray, int]):
             dtype=np.float32,
         )
         return obs
+
+
+class DbBerghainEnv(AbstractBerghainEnv):
+    """DB-backed env using LocalGame and Person models."""
+
+    def __init__(self, scenario: int, seed: int | None = None) -> None:
+        super().__init__(scenario, seed)
+        self.game: LocalGame | None = None
+        self._db_person: Person | None = None
+
+    def reset(
+        self, seed: int | None = None, options: dict[str, Any] | None = None
+    ) -> tuple[np.ndarray, dict[str, Any]]:
+        self.game = LocalGame.start_new_game(self.scenario)
+        self._db_person = Person.objects.get(game=self.game, decision__isnull=True)
+        return super().reset(seed=seed, options=options)
+
+    def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
+        assert self.game is not None and self._db_person is not None, (
+            "Environment must be reset() before step()."
+        )
+        self._db_person.make_decision(bool(action))
+        return super().step(action)
+
+    def get_curr_person_attrs(self) -> dict[str, bool] | None:
+        self._db_person = Person.objects.get(game=self.game, decision__isnull=True)
+        return cast(dict[str, bool], self._db_person.attributes)
+
+
+class SimBerghainEnv(AbstractBerghainEnv):
+    """In-memory env with seeded correlated attribute generator (no DB)."""
+
+    def __init__(self, scenario: int, seed: int | None = None) -> None:
+        super().__init__(scenario, seed)
+        cfg = SCENARIO_CONFIGS[self.scenario]
+        self._person_attr_generator: CorrelatedAttributeGenerator = (
+            CorrelatedAttributeGenerator(cfg["attribute_statistics"])
+        )
+        self._precomputed_people: list[dict[str, bool]] | None = None
+
+    def reset(
+        self, seed: int | None = None, options: dict[str, Any] | None = None
+    ) -> tuple[np.ndarray, dict[str, Any]]:
+        # Pre-generate a large pool of people for this episode
+        self._precomputed_people = self._person_attr_generator.sample(
+            CAPACITY + REJECTION_LIMIT, seed=seed
+        )
+        return super().reset(seed=seed, options=options)
+
+    def get_curr_person_attrs(self) -> dict[str, bool] | None:
+        assert self._precomputed_people is not None, (
+            "Environment must be reset() before fetching current person."
+        )
+        return self._precomputed_people.pop(0)
