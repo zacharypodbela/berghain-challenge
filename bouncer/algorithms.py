@@ -8,13 +8,18 @@ on people trying to get into the nightclub.
 from collections.abc import Callable
 from typing import TextIO
 
+from django.core.management.base import CommandError
 from stable_baselines3 import PPO
 
 from bouncer.models import Game, Person
 from bouncer.rl.env import ATTRIBUTE_ORDER, build_observation_vector
 
+AlgorithmFunc = Callable[[Person, Game, TextIO, str | None], bool]
 
-def too_nice_bouncer(person: Person, game: Game, stdout: TextIO | None) -> bool:
+
+def too_nice_bouncer(
+    person: Person, game: Game, stdout: TextIO, model_path: str | None
+) -> bool:
     """
     Simple algorithm that always accepts everyone.
 
@@ -28,7 +33,9 @@ def too_nice_bouncer(person: Person, game: Game, stdout: TextIO | None) -> bool:
     return True
 
 
-def so_mean_bouncer(person: Person, game: Game, stdout: TextIO | None) -> bool:
+def so_mean_bouncer(
+    person: Person, game: Game, stdout: TextIO, model_path: str | None
+) -> bool:
     """
     Simple algorithm that always rejects everyone.
 
@@ -42,7 +49,9 @@ def so_mean_bouncer(person: Person, game: Game, stdout: TextIO | None) -> bool:
     return False
 
 
-def optimal_markov_bouncer(person: Person, game: Game, stdout: TextIO | None) -> bool:
+def optimal_markov_bouncer(
+    person: Person, game: Game, stdout: TextIO, model_path: str | None
+) -> bool:
     """
     Markov Decision Process approach to minimize rejections while meeting constraints.
 
@@ -207,7 +216,9 @@ def _compute_counters(
     return A, B, Y1, W1, N
 
 
-def chat_gpt_bouncer(person: Person, game: Game, stdout: TextIO | None) -> bool:
+def chat_gpt_bouncer(
+    person: Person, game: Game, stdout: TextIO, model_path: str | None
+) -> bool:
     """
     Online decision rule with 'both-credit' and 'debt' guards.
 
@@ -281,14 +292,13 @@ def chat_gpt_bouncer(person: Person, game: Game, stdout: TextIO | None) -> bool:
     return accept
 
 
-# TODO: Enhance the Django command so we can specify a model path when running.
-# Its fine to just hard code it for now.
-PPO_MODEL_PATH = "runs/ppo_s1_v1/best/best_model.zip"
-
-
-def ppo_bouncer(person: Person, game: Game, stdout: TextIO | None) -> bool:
+def ppo_bouncer(
+    person: Person, game: Game, stdout: TextIO, model_path: str | None
+) -> bool:
     """Use a saved Stable-Baselines3 PPO policy to decide."""
-    model: PPO = PPO.load(PPO_MODEL_PATH)
+    if model_path is None:
+        raise CommandError("ppo_bouncer requires --model-path argument")
+    model: PPO = PPO.load(model_path)
 
     # Build observation vector from Game state
     admitted = int(game.admitted_count)
@@ -317,7 +327,6 @@ def ppo_bouncer(person: Person, game: Game, stdout: TextIO | None) -> bool:
 
 
 # Registry of available algorithms
-AlgorithmFunc = Callable[[Person, Game, TextIO | None], bool]
 ALGORITHMS: dict[str, AlgorithmFunc] = {
     "too_nice_bouncer": too_nice_bouncer,
     "so_mean_bouncer": so_mean_bouncer,

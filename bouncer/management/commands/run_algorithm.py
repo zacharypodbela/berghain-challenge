@@ -7,7 +7,7 @@ from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
-from bouncer.algorithms import ALGORITHMS, get_algorithm
+from bouncer.algorithms import ALGORITHMS, AlgorithmFunc, get_algorithm
 from bouncer.models import Game, LocalGame
 
 
@@ -43,13 +43,20 @@ class Command(BaseCommand):
             default=0.0,
             help="Delay in seconds between decisions (default: 0.0)",
         )
+        parser.add_argument(
+            "--model-path",
+            type=str,
+            default="",
+            help="Optional path to a model file for model-based algorithms (e.g., PPO).",
+        )
 
     def handle(self, *args: Any, **options: Any) -> None:
         game_id = options["game_id"]
         scenario = options.get("scenario")
-        n_games = options.get("n_games")
+        n_games = int(options.get("n_games") or 1)
         algorithm_name = options["algorithm"]
         delay = options["delay"]
+        model_path = options.get("model_path")
 
         # Validate scenario/game-id combinations
         if game_id and scenario:
@@ -146,7 +153,7 @@ class Command(BaseCommand):
             self.handle_game_restart(game)
 
             # Run the algorithm
-            self.run_algorithm(game, algorithm, delay)
+            self.run_algorithm(game, algorithm, delay, model_path)
 
     def get_status_color(self, status: str) -> Any | None:
         """Get color styling for game status"""
@@ -181,7 +188,9 @@ class Command(BaseCommand):
                 f"(found {pending_people.count()} pending people)"
             )
 
-    def run_algorithm(self, game: Game, algorithm: Any, delay: float) -> None:
+    def run_algorithm(
+        self, game: Game, algorithm: AlgorithmFunc, delay: float, model_path: str | None
+    ) -> None:
         """Run the algorithm on the game until completion or error"""
         decisions_made = 0
 
@@ -201,7 +210,7 @@ class Command(BaseCommand):
                 break
 
             # Make decision using algorithm
-            decision = algorithm(pending_person, game, self.stdout)
+            decision = algorithm(pending_person, game, self.stdout, model_path)
             decision_text = "ACCEPT" if decision else "REJECT"
 
             self.stdout.write(
