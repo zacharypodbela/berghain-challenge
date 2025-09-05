@@ -71,56 +71,8 @@ class Command(BaseCommand):
             raise CommandError("Provide either --game-id or --scenario, not both.")
         if use_server and not scenario:
             raise CommandError("--server can only be used with --scenario.")
-        if n_games != 1 and (game_id or not scenario):
+        if n_games != 1 and not scenario:
             raise CommandError("--n-games can only be used with --scenario.")
-
-        games_to_run: list[Game] = []
-        if scenario:
-            # Start one or more new LocalGame episodes for the given scenario
-            for _i in range(n_games):
-                if use_server:
-                    g = RemoteGame.start_new_game(int(scenario))
-                else:
-                    g = LocalGame.start_new_game(int(scenario))
-                games_to_run.append(g)
-                self.stdout.write(
-                    self.style.SUCCESS(
-                        f"Created {'RemoteGame' if use_server else 'LocalGame'} {g.game_id} for scenario {g.scenario}"
-                    )
-                )
-        else:
-            # Get game ID from user if not provided
-            if not game_id:
-                self.stdout.write("\nAvailable games:")
-                games = (
-                    Game.objects.filter(status="running").all().order_by("-created_at")
-                )
-                for game in games[:10]:  # Show latest 10 games
-                    status_color = self.get_status_color(game.status)
-                    if status_color:
-                        status_text = status_color(game.status)
-                    else:
-                        status_text = game.status
-                    self.stdout.write(
-                        f"  {game.game_id} (Scenario {game.scenario}, "
-                        f"Status: {status_text}, "
-                        f"People: {game.people.count()})"
-                    )
-
-                game_id = input("\nEnter game ID to run algorithm on: ").strip()
-                if not game_id:
-                    raise CommandError("No game ID provided")
-
-            # Get and validate single game
-            try:
-                game = Game.objects.get(game_id=game_id)
-                if game.status != "running":
-                    raise CommandError(
-                        f'Game "{game_id}" has status "{game.status}" - can only run on "running" games'
-                    )
-            except Game.DoesNotExist as e:
-                raise CommandError(f'Game "{game_id}" does not exist') from e
-            games_to_run.append(game)
 
         # Get algorithm from user if not provided
         if not algorithm_name:
@@ -139,11 +91,56 @@ class Command(BaseCommand):
             raise CommandError(str(e)) from e
 
         # Loop over one or more games
-        for idx, game in enumerate(games_to_run, start=1):
-            if len(games_to_run) > 1:
+        for idx in range(1, n_games + 1):
+            if n_games > 1:
+                self.stdout.write(self.style.MIGRATE_HEADING(f"\nRun {idx}/{n_games}"))
+
+            game: Game = None
+            if scenario:
+                # Start one or more new LocalGame episodes for the given scenario
+                if use_server:
+                    game = RemoteGame.start_new_game(int(scenario))
+                else:
+                    game = LocalGame.start_new_game(int(scenario))
                 self.stdout.write(
-                    self.style.MIGRATE_HEADING(f"\nRun {idx}/{len(games_to_run)}")
+                    self.style.SUCCESS(
+                        f"Created {'RemoteGame' if use_server else 'LocalGame'} {game.game_id} for scenario {game.scenario}"
+                    )
                 )
+            else:
+                # Get game ID from user if not provided
+                if not game_id:
+                    self.stdout.write("\nAvailable games:")
+                    games = (
+                        Game.objects.filter(status="running")
+                        .all()
+                        .order_by("-created_at")
+                    )
+                    for game in games[:10]:  # Show latest 10 games
+                        status_color = self.get_status_color(game.status)
+                        if status_color:
+                            status_text = status_color(game.status)
+                        else:
+                            status_text = game.status
+                        self.stdout.write(
+                            f"  {game.game_id} (Scenario {game.scenario}, "
+                            f"Status: {status_text}, "
+                            f"People: {game.people.count()})"
+                        )
+
+                    game_id = input("\nEnter game ID to run algorithm on: ").strip()
+                    if not game_id:
+                        raise CommandError("No game ID provided")
+
+                # Get and validate single game
+                try:
+                    game = Game.objects.get(game_id=game_id)
+                    if game.status != "running":
+                        raise CommandError(
+                            f'Game "{game_id}" has status "{game.status}" - can only run on "running" games'
+                        )
+                except Game.DoesNotExist as e:
+                    raise CommandError(f'Game "{game_id}" does not exist') from e
 
             self.stdout.write(
                 f"\n{self.style.SUCCESS('Starting algorithm run:')}\n"
