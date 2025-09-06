@@ -346,6 +346,95 @@ def deficit_weighted_bouncer(
     return bool(overlap_needed >= required_k)
 
 
+def deficit_weighted_bouncer_s3(
+    person: Person, game: Game, stdout: TextIO, model_path: str | None
+) -> bool:
+    """A variant of deficit_weighted_bouncer with special rules to win scenario 3."""
+    constraints = {c["attribute"]: int(c["minCount"]) for c in game.constraints}
+    min_counts = {a: int(constraints.get(a, 0)) for a in ATTRIBUTE_ORDER}
+
+    # Accepted counts so far
+    accepted_attr_counts: dict[str, int] = {}
+    for attr in ATTRIBUTE_ORDER:
+        accepted_attr_counts[attr] = game.people.filter(
+            decision=True, **{f"attributes__{attr}": True}
+        ).count()
+
+    admitted = int(game.admitted_count)
+    remaining_capacity = max(0, CAPACITY - admitted)
+
+    # Deficits
+    deficits: dict[str, int] = {}
+    total_deficits = 0
+    for attr in ATTRIBUTE_ORDER:
+        need = max(0, min_counts.get(attr, 0) - accepted_attr_counts.get(attr, 0))
+        deficits[attr] = need
+        total_deficits += need
+
+    if total_deficits == 0:
+        return True
+
+    needed_attributes = [attr for attr in ATTRIBUTE_ORDER if deficits[attr] > 0]
+    needed_rare_attributes = [
+        attr
+        for attr in needed_attributes
+        if attr in ["queer_friendly", "vinyl_collector", "international"]
+    ]
+
+    if deficits["german_speaker"] > 0:
+        num_attributes = sum(
+            1 for attr in ATTRIBUTE_ORDER if bool(person.attributes.get(attr, False))
+        )
+        num_needed_rare_attributes_in_curr_person = sum(
+            1
+            for attr in needed_rare_attributes
+            if bool(person.attributes.get(attr, False))
+        )
+        num_needed_rare_attributes = sum(1 for attr in needed_rare_attributes)
+        if bool(person.attributes.get("german_speaker", False)):
+            return (
+                num_needed_rare_attributes_in_curr_person
+                >= num_needed_rare_attributes - 1
+            )
+        elif num_needed_rare_attributes == 0:
+            return num_attributes >= 2
+        else:
+            return (
+                num_needed_rare_attributes_in_curr_person >= num_needed_rare_attributes
+            )
+
+    # Needed-overlap for this person
+    needed_present = [
+        attr
+        for attr in ATTRIBUTE_ORDER
+        if deficits[attr] > 0 and bool(person.attributes.get(attr, False))
+    ]
+    overlap = len(needed_present)
+    if overlap == 0 or remaining_capacity <= 0:
+        return False
+
+    k = max(1, math.ceil(float(total_deficits) / float(remaining_capacity)))
+    if overlap >= k + 1:
+        return True
+
+    # Urgent set: top-2 deficits
+    urgent = [
+        a
+        for a, d in sorted(deficits.items(), key=lambda x: x[1], reverse=True)
+        if d > 0
+    ][:2]
+    if overlap >= k and any(a in urgent for a in needed_present):
+        return True
+
+    # Coverage share criterion (focus on largest deficits)
+    covered_deficit = sum(deficits[a] for a in needed_present)
+    coverage_share = float(covered_deficit) / float(max(1, total_deficits))
+    if overlap >= k and coverage_share >= 0.6:
+        return True
+
+    return False
+
+
 def ppo_bouncer(
     person: Person, game: Game, stdout: TextIO, model_path: str | None
 ) -> bool:
@@ -387,6 +476,7 @@ ALGORITHMS: dict[str, AlgorithmFunc] = {
     "optimal_markov_bouncer": optimal_markov_bouncer,
     "two_trait_heuristic_bouncer": two_trait_heuristic_bouncer,
     "deficit_weighted_bouncer": deficit_weighted_bouncer,
+    "deficit_weighted_bouncer_s3": deficit_weighted_bouncer_s3,
     "ppo_bouncer": ppo_bouncer,
 }
 

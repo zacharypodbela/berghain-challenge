@@ -146,6 +146,31 @@ python manage.py pretrain_bc --datasets ds1.npz,ds2.npz --out models/bc_init.zip
 - Initializes PPO policy via cross-entropy on expert actions; value network is frozen during pretrain.
 - Output can be fed to `train_ppo` via `--init-from`.
 
+### Eval PPO (`eval_ppo`)
+
+Evaluate a saved PPO model quickly in the in-memory simulator (no database I/O). Runs several episodes in `SimBerghainEnv` and reports summary stats.
+
+```bash
+python manage.py eval_ppo --model-path models/ppo_model.zip --scenario 2 [--episodes 100] [--deterministic] [--seed 123]
+```
+
+**Params:**
+
+- `--model-path <str>`: Path to a Stable-Baselines3 PPO `.zip` model.
+- `--scenario <int>`: Scenario to evaluate (choices: 1, 2, 3).
+- `--episodes <int>`: Number of episodes to roll out (default `50`).
+- `--seed <int>`: Base RNG seed; each episode uses `seed + ep` (default `123`).
+- `--deterministic`: If set, select greedy actions; otherwise sample stochastically.
+
+**Notes:**
+
+- Evaluation uses true task rewards (no shaping wrapper), matching `train_ppo` eval.
+- Summary includes mean/std of reward and episode length, mean/std admitted/rejected, and counts of outcomes (`success`, `constraints_unmet_at_capacity`, `rejection_limit`).
+- Deterministic: Picks the most probable action (argmax of the policy’s categorical distribution). For PPO with Discrete(2), it always chooses the action with the higher logit. Produces stable, repeatable behavior and is what you typically want for deployment or head‑to‑head comparisons.
+- Stochastic: Samples from the policy’s action distribution (softmax over logits). Adds variability across runs/steps, giving an unbiased estimate of the policy’s expected return and revealing how “confident” or sharp the policy is. Results with stochastic depend on RNG state, so use more episodes for stable averages.
+- Deterministic is good for final evaluation, reproducible metrics, and live play (our ppo_bouncer uses deterministic=True). Stochastic is good for diagnostics and robustness checks; estimating expected return over many episodes;seeing whether the policy relies on probabilistic choices.
+- If the policy is confident (peaked distribution), deterministic and stochastic behave similarly. With exploration/entropy during training, the learned policy can remain somewhat stochastic; deterministic eval can be slightly better (no unlucky samples), but stochastic gives the true expected performance.
+
 ### Compare Policies (`compare_policies`)
 
 Compare a trained PPO model’s decisions to an exported expert dataset and report agreement on decisions.
