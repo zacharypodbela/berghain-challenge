@@ -381,10 +381,8 @@ def deficit_weighted_bouncer_s3(
         if attr in ["queer_friendly", "vinyl_collector", "international"]
     ]
 
+    # These hardcoded rules run for 90% of the game, then the generic deficit-weighted heuristic takes over to finish
     if deficits["german_speaker"] > 0:
-        num_attributes = sum(
-            1 for attr in ATTRIBUTE_ORDER if bool(person.attributes.get(attr, False))
-        )
         num_needed_rare_attributes_in_curr_person = sum(
             1
             for attr in needed_rare_attributes
@@ -396,12 +394,14 @@ def deficit_weighted_bouncer_s3(
                 num_needed_rare_attributes_in_curr_person
                 >= num_needed_rare_attributes - 1
             )
-        elif num_needed_rare_attributes == 0:
-            return num_attributes >= 2
         else:
-            return (
-                num_needed_rare_attributes_in_curr_person >= num_needed_rare_attributes
-            )
+            if num_needed_rare_attributes <= 1:
+                return False
+            else:
+                return (
+                    num_needed_rare_attributes_in_curr_person
+                    == num_needed_rare_attributes
+                )
 
     # Needed-overlap for this person
     needed_present = [
