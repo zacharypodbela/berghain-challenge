@@ -60,6 +60,5 @@ MANIFEST
 *.log
 
 # Model Runs
-runs/
-models/
+runs/*/checkpoints/
 datasets/
