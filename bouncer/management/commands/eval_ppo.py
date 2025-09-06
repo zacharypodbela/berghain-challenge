@@ -93,6 +93,11 @@ class Command(BaseCommand):
             arr = np.asarray(xs, dtype=np.float64)
             return float(arr.mean()), float(arr.std(ddof=0))
 
+        def _pctl(xs: list[float], q: float) -> float:
+            if not xs:
+                return 0.0
+            return float(np.percentile(np.asarray(xs, dtype=np.float64), q))
+
         mean_r, std_r = _mean_std(rewards)
         mean_len, std_len = _mean_std([float(x) for x in lengths])
         mean_adm, std_adm = _mean_std([float(x) for x in admits])
@@ -100,15 +105,34 @@ class Command(BaseCommand):
 
         self.stdout.write("\nSummary")
         self.stdout.write("-------")
-        self.stdout.write(f"Model:     {model_path}")
-        self.stdout.write(f"Scenario:  {scenario}")
-        self.stdout.write(f"Episodes:  {n_episodes}")
+        self.stdout.write(f"Model: {model_path}")
+        self.stdout.write(f"Scenario: {scenario}")
+        self.stdout.write(f"Episodes: {n_episodes}")
+        # Percentiles
+        p90_r = _pctl(rewards, 90.0)
+        p95_r = _pctl(rewards, 95.0)
+        p90_len = _pctl([float(x) for x in lengths], 90.0)
+        p95_len = _pctl([float(x) for x in lengths], 95.0)
+        p90_adm = _pctl([float(x) for x in admits], 90.0)
+        p95_adm = _pctl([float(x) for x in admits], 95.0)
+        p90_rej = _pctl([float(x) for x in rejects], 90.0)
+        p95_rej = _pctl([float(x) for x in rejects], 95.0)
+
+        self.stdout.write()
+        self.stdout.write("|   | Mean | Std | P90 | P95 |")
+        self.stdout.write("|---|------|-----|-----|-----|")
         self.stdout.write(
-            f"Reward:    mean={mean_r:.2f} std={std_r:.2f} | length: mean={mean_len:.1f} std={std_len:.1f}"
+            f"| Reward | mean={mean_r:.2f} | std={std_r:.2f} | p90={p90_r:.2f} | p95={p95_r:.2f} |"
         )
         self.stdout.write(
-            f"Admitted:  mean={mean_adm:.1f} std={std_adm:.1f} | Rejected: mean={mean_rej:.1f} std={std_rej:.1f}"
+            f"| length | mean={mean_len:.1f} | std={std_len:.1f} | p90={p90_len:.1f} | p95={p95_len:.1f} |"
         )
         self.stdout.write(
-            f"Outcomes:  success={reasons[EpisodeResult.SUCCESS.value]} unmet_at_capacity={reasons[EpisodeResult.CONSTRAINTS_UNMET_AT_CAPACITY.value]} rejection_limit={reasons[EpisodeResult.REJECTION_LIMIT.value]}"
+            f"| Admitted | mean={mean_adm:.1f} | std={std_adm:.1f} | p90={p90_adm:.1f} | p95={p95_adm:.1f} |"
+        )
+        self.stdout.write(
+            f"| Rejected | mean={mean_rej:.1f} | std={std_rej:.1f} | p90={p90_rej:.1f} | p95={p95_rej:.1f} |"
+        )
+        self.stdout.write(
+            f"| Outcomes | success={reasons[EpisodeResult.SUCCESS.value]} | unmet_at_capacity={reasons[EpisodeResult.CONSTRAINTS_UNMET_AT_CAPACITY.value]} | rejection_limit={reasons[EpisodeResult.REJECTION_LIMIT.value]} | |"
         )

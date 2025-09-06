@@ -61,4 +61,5 @@ MANIFEST
 
 # Model Runs
 runs/*/checkpoints/
+*/sweeps/*
 datasets/
