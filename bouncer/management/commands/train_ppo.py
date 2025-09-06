@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Callable
 
 from django.core.management.base import BaseCommand
 
@@ -12,6 +12,7 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, VecNormalize
 
 from bouncer.constants import CAPACITY, SCENARIO_CONFIGS
+from bouncer.rl.callbacks import PercentileEvalCallback
 from bouncer.rl.env import ATTRIBUTE_ORDER, DeficitRewardWrapper, SimBerghainEnv
 
 
@@ -39,6 +40,14 @@ class Command(BaseCommand):
         )
         parser.add_argument("--eval-freq", type=int, default=10_000)
         parser.add_argument("--eval-episodes", type=int, default=5)
+        parser.add_argument(
+            "--eval-percentile",
+            type=float,
+            default=0.0,
+            help=(
+                "If > 0, select best model by this reward percentile (e.g., 90 or 95) instead of mean."
+            ),
+        )
         parser.add_argument(
             "--curriculum",
             type=str,
@@ -106,6 +115,28 @@ class Command(BaseCommand):
             default=0.0,
             help="Entropy regularization coefficient for PPO (exploration).",
         )
+        parser.add_argument(
+            "--fail-penalty-scale",
+            type=float,
+            default=1.0,
+            help=(
+                "Scale terminal penalty on unmet minima at capacity: effective penalty becomes -s*REJECTION_LIMIT (training only)."
+            ),
+        )
+        parser.add_argument(
+            "--success-bonus-per-saved",
+            type=float,
+            default=0.0,
+            help=("Add k*(REJECTION_LIMIT - rejected) upon success (training only)."),
+        )
+        parser.add_argument(
+            "--late-reject-weight",
+            type=float,
+            default=0.0,
+            help=(
+                "Extra per-reject penalty scaled by endgame slack: -w*(1 - slack_frac) (training only)."
+            ),
+        )
 
     def handle(self, *args: Any, **options: Any) -> None:
         scenario: int = int(options["scenario"])
@@ -125,6 +156,11 @@ class Command(BaseCommand):
         success_bonus: float = float(options["success_bonus"])
         minmeet_bonus: float = float(options["minmeet_bonus"])
         ent_coef: float = float(options["ent_coef"])
+        fail_penalty_scale: float = float(options.get("fail_penalty_scale", 1.0))
+        success_bonus_per_saved: float = float(
+            options.get("success_bonus_per_saved", 0.0)
+        )
+        late_reject_weight: float = float(options.get("late_reject_weight", 0.0))
         cur_str: str = str(options.get("curriculum") or "").strip()
         stage_steps: int = int(options.get("stage_steps") or 300_000)
 
@@ -164,6 +200,9 @@ class Command(BaseCommand):
                     nonhelp_penalty=nonhelp_penalty,
                     success_bonus=success_bonus,
                     minmeet_bonus=minmeet_bonus,
+                    fail_penalty_scale=fail_penalty_scale,
+                    success_bonus_per_saved=success_bonus_per_saved,
+                    late_reject_weight=late_reject_weight,
                 )
             return env
 
@@ -244,14 +283,28 @@ class Command(BaseCommand):
         checkpoint_cb = CheckpointCallback(
             save_freq=max(10_000 // n_envs, 1), save_path=ckpt_dir, name_prefix="ppo"
         )
-        eval_cb = EvalCallback(
-            eval_env,
-            best_model_save_path=os.path.join(log_dir, "best"),
-            log_path=os.path.join(log_dir, "eval"),
-            eval_freq=max(eval_freq // max(1, n_envs), 1),
-            n_eval_episodes=eval_episodes,
-            deterministic=True,
-        )
+        eval_percentile: float = float(options.get("eval_percentile", 0.0) or 0.0)
+        eval_cb: EvalCallback | PercentileEvalCallback
+        if eval_percentile > 0.0:
+            eval_cb = PercentileEvalCallback(
+                eval_env,
+                eval_freq=max(eval_freq // max(1, n_envs), 1),
+                n_eval_episodes=eval_episodes,
+                percentile=eval_percentile,
+                deterministic=True,
+                best_model_save_path=os.path.join(log_dir, "best"),
+                log_path=os.path.join(log_dir, "eval"),
+                verbose=1,
+            )
+        else:
+            eval_cb = EvalCallback(
+                eval_env,
+                best_model_save_path=os.path.join(log_dir, "best"),
+                log_path=os.path.join(log_dir, "eval"),
+                eval_freq=max(eval_freq // max(1, n_envs), 1),
+                n_eval_episodes=eval_episodes,
+                deterministic=True,
+            )
 
         # Train (with optional curriculum)
         if cur_str:
@@ -276,7 +329,9 @@ class Command(BaseCommand):
                 }
 
                 # Rebuild training env for this stage
-                def _stage_env_factory(capacity: int, minov: dict[str, int]) -> Any:
+                def _stage_env_factory(
+                    capacity: int, minov: dict[str, int]
+                ) -> Callable[[], SimBerghainEnv | DeficitRewardWrapper]:
                     return lambda: _make_env(cap_override=capacity, min_override=minov)
 
                 venv = make_vec_env(

@@ -328,12 +328,18 @@ class DeficitRewardWrapper(Env[NDArray[np.float32], int]):
         nonhelp_penalty: float = 0.0,
         success_bonus: float = 0.0,
         minmeet_bonus: float = 0.0,
+        fail_penalty_scale: float = 1.0,
+        success_bonus_per_saved: float = 0.0,
+        late_reject_weight: float = 0.0,
     ) -> None:
         self.env = env
         self.coef = float(coef)
         self.nonhelp_penalty = float(nonhelp_penalty)
         self.success_bonus = float(success_bonus)
         self.minmeet_bonus = float(minmeet_bonus)
+        self.fail_penalty_scale = float(fail_penalty_scale)
+        self.success_bonus_per_saved = float(success_bonus_per_saved)
+        self.late_reject_weight = float(late_reject_weight)
         self.action_space = env.action_space
         self.observation_space = env.observation_space
 
@@ -383,6 +389,12 @@ class DeficitRewardWrapper(Env[NDArray[np.float32], int]):
             and deficits_after_total == deficits_before_total
         ):
             shaped -= self.nonhelp_penalty
+        # Additional penalty for late rejections (when slack is low)
+        if self.late_reject_weight != 0.0 and action == 0:
+            remaining_abs = int(base_env.capacity) - int(base_env.admitted)
+            slack_after = max(0, remaining_abs - int(deficits_after_total))
+            slack_after_frac = float(slack_after) / float(max(1, base_env.capacity))
+            shaped -= self.late_reject_weight * (1.0 - slack_after_frac)
         # Bonus for meeting any minimum exactly at this step
         if self.minmeet_bonus != 0.0:
             met_now = 0
@@ -391,7 +403,19 @@ class DeficitRewardWrapper(Env[NDArray[np.float32], int]):
                     met_now += 1
             if met_now > 0:
                 shaped += self.minmeet_bonus * float(met_now)
-        # Success terminal shaping bonus
-        if terminated and info.get("reason") == EpisodeResult.SUCCESS.value:
-            shaped += self.success_bonus
+        # Terminal shaping
+        if terminated:
+            reason = info.get("reason")
+            if reason == EpisodeResult.SUCCESS.value:
+                # Fixed success bonus
+                shaped += self.success_bonus
+                # Bonus proportional to rejections saved in this episode
+                if self.success_bonus_per_saved != 0.0:
+                    saved = float(REJECTION_LIMIT - int(base_env.rejected))
+                    shaped += self.success_bonus_per_saved * saved
+            elif reason == EpisodeResult.CONSTRAINTS_UNMET_AT_CAPACITY.value:
+                # Base env already applied -REJECTION_LIMIT; scale it by adding back a fraction
+                # Effective penalty becomes -fail_penalty_scale * REJECTION_LIMIT
+                if self.fail_penalty_scale != 1.0:
+                    shaped += (1.0 - self.fail_penalty_scale) * float(REJECTION_LIMIT)
         return obs, shaped, terminated, truncated, info

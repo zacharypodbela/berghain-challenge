@@ -115,17 +115,27 @@ python manage.py train_ppo --scenario 1 --total-timesteps 200000 --n-envs 8 --lo
 
 - `--init-from <str>`: Optional PPO `.zip` to initialize from (e.g., BC pretrain or continue training).
 - `--seed <int>`: Random seed.
-- `--eval-freq <int>` / `--eval-episodes <int>`: Eval cadence and episodes per eval.
 - `--curriculum <str>`: Comma-separated capacities (e.g., `200,400,700,1000`) to stage training.
 - `--stage-steps <int>`: Timesteps per curriculum stage.
 - `--no-vecnorm`: Disable reward normalization (VecNormalize).
 - `--gamma <float>` / `--gae-lambda <float>` / `--n-steps <int>` / `--ent-coef <float>`: PPO hyperparameters.
-- `--shape-coef <float>` / `--nonhelp-penalty <float>` / `--success-bonus <float>` / `--minmeet-bonus <float>`: Reward shaping knobs.
+- Reward shaping (training only; eval uses true rewards):
+  - `--shape-coef <float>`: Dense reward for reducing total deficits between steps.
+  - `--nonhelp-penalty <float>`: Extra penalty when an accept does not reduce any deficits while deficits remain.
+  - `--success-bonus <float>`: Fixed bonus added on successful completion (at capacity with all minima met).
+  - `--minmeet-bonus <float>`: Per-attribute bonus when a minimum is first met on that step.
+  - `--fail-penalty-scale <float>`: Scale the terminal penalty for failing at capacity due to unmet minima; effective penalty is `-s * REJECTION_LIMIT` (default `1.0`).
+  - `--success-bonus-per-saved <float>`: Adds `k * (REJECTION_LIMIT - rejected)` at success to reward saving rejections.
+  - `--late-reject-weight <float>`: Extra penalty on reject steps weighted by low slack: subtracts `w * (1 - slack_frac)`.
+- Eval selection:
+  - `--eval-freq <int>` / `--eval-episodes <int>`: Eval cadence and episodes per eval.
+  - `--eval-percentile <float>`: If > 0 (e.g., `90` or `95`), selects the best checkpoint by that reward percentile instead of mean.
 
 **Notes:**
 
 - Curriculum scales minimum counts proportionally to the staged capacity.
 - When `--init-from` is provided, weights are loaded into a fresh PPO to match current rollout shape/hyperparams.
+- Training reward shaping applies only to the training envs. Evaluation envs are unshaped (true task rewards). If `--eval-percentile` is set, percentile is computed over true rewards.
 
 ### Pretrain BC (`pretrain_bc`)
 
