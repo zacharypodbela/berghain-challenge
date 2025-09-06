@@ -461,6 +461,7 @@ def ppo_bouncer(
         min_counts=min_counts,
         accepted_attr_counts=accepted_attr_counts,
         current_attrs=person.attributes,
+        capacity=CAPACITY,
     )
 
     # Give the model the observation vector and ask for next action

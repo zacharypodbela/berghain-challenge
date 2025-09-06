@@ -7,6 +7,7 @@ import numpy as np
 from django.core.management.base import BaseCommand, CommandError
 from numpy.typing import NDArray
 
+from bouncer.constants import CAPACITY
 from bouncer.models import Game, Person
 from bouncer.rl.env import ATTRIBUTE_ORDER, build_observation_vector
 
@@ -106,6 +107,7 @@ class Command(BaseCommand):
                     min_counts=min_counts,
                     accepted_attr_counts=accepted_attr_counts,
                     current_attrs=attrs,
+                    capacity=CAPACITY,
                 )
                 obs_list.append(obs)
                 act = 1 if bool(decision) else 0

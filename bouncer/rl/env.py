@@ -44,6 +44,7 @@ def build_observation_vector(
     min_counts: dict[str, int],
     accepted_attr_counts: dict[str, int],
     current_attrs: dict[str, bool],
+    capacity: int,
 ) -> NDArray[np.float32]:
     """Construct the 31-dim observation vector used by both env and wrappers.
 
@@ -51,9 +52,9 @@ def build_observation_vector(
     slack_frac, for each attr in ATTRIBUTE_ORDER: (curr_bit, remain_need_frac)].
     """
     s = _one_hot_scenario(scenario)
-    admitted_frac = float(admitted) / float(CAPACITY)
-    remaining_abs = CAPACITY - admitted
-    remaining_frac = float(remaining_abs) / float(CAPACITY)
+    admitted_frac = float(admitted) / float(capacity)
+    remaining_abs = capacity - admitted
+    remaining_frac = float(remaining_abs) / float(capacity)
     rejection_pressure = float(rejected) / float(REJECTION_LIMIT)
 
     remain_need_fracs: list[float] = []
@@ -63,9 +64,9 @@ def build_observation_vector(
         accepted_c = int(accepted_attr_counts.get(attr, 0))
         deficit_abs = max(0, min_c - accepted_c)
         deficits_abs_total += deficit_abs
-        remain_need_fracs.append(float(deficit_abs) / float(CAPACITY))
+        remain_need_fracs.append(float(deficit_abs) / float(capacity))
 
-    slack_frac = float(max(0, remaining_abs - deficits_abs_total)) / float(CAPACITY)
+    slack_frac = float(max(0, remaining_abs - deficits_abs_total)) / float(capacity)
 
     curr_bits: list[float] = []
     for attr in ATTRIBUTE_ORDER:
@@ -111,6 +112,7 @@ class AbstractBerghainEnv(Env[NDArray[np.float32], int]):
     accepted_attr_counts: dict[str, int]
     min_counts: dict[str, int]
     _current_attrs: dict[str, bool] | None
+    capacity: int
 
     def __init__(self, scenario: int, seed: int | None = None) -> None:
         if type(self) is AbstractBerghainEnv:
@@ -133,6 +135,7 @@ class AbstractBerghainEnv(Env[NDArray[np.float32], int]):
         self.accepted_attr_counts = dict.fromkeys(ATTRIBUTE_ORDER, 0)
         self.min_counts = dict.fromkeys(ATTRIBUTE_ORDER, 0)
         self._current_attrs = None
+        self.capacity = CAPACITY
 
         # Cached constraints for scenario
         cfg = SCENARIO_CONFIGS[self.scenario]
@@ -166,6 +169,7 @@ class AbstractBerghainEnv(Env[NDArray[np.float32], int]):
             min_counts=self.min_counts,
             accepted_attr_counts=self.accepted_attr_counts,
             current_attrs=self._current_attrs,
+            capacity=self.capacity,
         )
         return obs, {}
 
@@ -189,7 +193,7 @@ class AbstractBerghainEnv(Env[NDArray[np.float32], int]):
 
         # Check if episode is done
         result = EpisodeResult.RUNNING
-        if self.admitted >= CAPACITY:
+        if self.admitted >= self.capacity:
             deficits = 0
             for attr in ATTRIBUTE_ORDER:
                 min_c = self.min_counts.get(attr, 0)
@@ -236,6 +240,7 @@ class AbstractBerghainEnv(Env[NDArray[np.float32], int]):
             min_counts=self.min_counts,
             accepted_attr_counts=self.accepted_attr_counts,
             current_attrs=self._current_attrs,
+            capacity=self.capacity,
         )
         return obs, reward, False, truncated, info
 
@@ -272,20 +277,31 @@ class DbBerghainEnv(AbstractBerghainEnv):
 class SimBerghainEnv(AbstractBerghainEnv):
     """In-memory env with seeded correlated attribute generator (no DB)."""
 
-    def __init__(self, scenario: int, seed: int | None = None) -> None:
+    def __init__(
+        self,
+        scenario: int,
+        seed: int | None = None,
+        *,
+        capacity: int | None = None,
+        min_counts: dict[str, int] | None = None,
+    ) -> None:
         super().__init__(scenario, seed)
         cfg = SCENARIO_CONFIGS[self.scenario]
         self._person_attr_generator: CorrelatedAttributeGenerator = (
             CorrelatedAttributeGenerator(cfg["attribute_statistics"])
         )
         self._precomputed_people: list[dict[str, bool]] | None = None
+        if capacity is not None:
+            self.capacity = int(capacity)
+        if min_counts is not None:
+            self.min_counts = {a: int(min_counts.get(a, 0)) for a in ATTRIBUTE_ORDER}
 
     def reset(
         self, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[NDArray[np.float32], dict[str, Any]]:
         # Pre-generate a large pool of people for this episode
         self._precomputed_people = self._person_attr_generator.sample(
-            CAPACITY + REJECTION_LIMIT, seed=seed
+            self.capacity + REJECTION_LIMIT, seed=seed
         )
         return super().reset(seed=seed, options=options)
 

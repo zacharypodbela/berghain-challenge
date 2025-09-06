@@ -11,7 +11,8 @@ from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, VecNormalize
 
-from bouncer.rl.env import DeficitRewardWrapper, SimBerghainEnv
+from bouncer.constants import CAPACITY, SCENARIO_CONFIGS
+from bouncer.rl.env import ATTRIBUTE_ORDER, DeficitRewardWrapper, SimBerghainEnv
 
 
 def _validated_n_steps(n_envs: int, target: int = 2048) -> int:
@@ -38,6 +39,18 @@ class Command(BaseCommand):
         )
         parser.add_argument("--eval-freq", type=int, default=10_000)
         parser.add_argument("--eval-episodes", type=int, default=5)
+        parser.add_argument(
+            "--curriculum",
+            type=str,
+            default="",
+            help="Comma-separated capacities to stage training (e.g., '200,400,700,1000').",
+        )
+        parser.add_argument(
+            "--stage-steps",
+            type=int,
+            default=300_000,
+            help="Timesteps to train per curriculum stage.",
+        )
         parser.add_argument(
             "--no-vecnorm",
             action="store_true",
@@ -112,6 +125,19 @@ class Command(BaseCommand):
         success_bonus: float = float(options["success_bonus"])
         minmeet_bonus: float = float(options["minmeet_bonus"])
         ent_coef: float = float(options["ent_coef"])
+        cur_str: str = str(options.get("curriculum") or "").strip()
+        stage_steps: int = int(options.get("stage_steps") or 300_000)
+
+        if (
+            bool(total_timesteps)
+            and bool(options.get("curriculum"))
+            and not bool(options.get("stage_steps"))
+        ):
+            self.stdout.write(
+                self.style.WARNING(
+                    "--total_timesteps is ignored when using --curriculum. To control total timesteps, adjust --stage-steps."
+                )
+            )
 
         os.makedirs(log_dir, exist_ok=True)
         os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
@@ -122,9 +148,15 @@ class Command(BaseCommand):
             )
         )
 
-        # Build vectorized training envs
-        def _make_env() -> SimBerghainEnv | DeficitRewardWrapper:
-            env = SimBerghainEnv(scenario=scenario)
+        # Helper to build envs with optional capacity/minima overrides
+        def _make_env(
+            cap_override: int | None = None, min_override: dict[str, int] | None = None
+        ) -> SimBerghainEnv | DeficitRewardWrapper:
+            env = SimBerghainEnv(
+                scenario=scenario,
+                capacity=cap_override,
+                min_counts=min_override,
+            )
             if shape_coef > 0.0:
                 return DeficitRewardWrapper(
                     env,
@@ -135,7 +167,8 @@ class Command(BaseCommand):
                 )
             return env
 
-        venv: VecEnv = make_vec_env(_make_env, n_envs=n_envs, seed=seed)
+        # Default training env (no curriculum overrides)
+        venv: VecEnv = make_vec_env(lambda: _make_env(), n_envs=n_envs, seed=seed)
 
         # Optional reward normalization (obs are already 0..1 scaled)
         vec_norm_path = os.path.join(log_dir, "vecnormalize.pkl")
@@ -220,8 +253,55 @@ class Command(BaseCommand):
             deterministic=True,
         )
 
-        # Train
-        model.learn(total_timesteps=total_timesteps, callback=[checkpoint_cb, eval_cb])
+        # Train (with optional curriculum)
+        if cur_str:
+            caps = [int(x) for x in cur_str.split(",") if x.strip()]
+            # Build min-counts override from scenario config scaled by capacity
+            base_constraints = {
+                c["attribute"]: int(c["minCount"])
+                for c in SCENARIO_CONFIGS[scenario]["constraints"]
+            }
+            self.stdout.write(
+                self.style.MIGRATE_HEADING(
+                    f"Curriculum: {caps} (stage_steps={stage_steps})"
+                )
+            )
+
+            # Start from the already-initialized model and loop stages
+            for cap in caps:
+                scale = float(cap) / float(CAPACITY)
+                min_override = {
+                    a: int(round(base_constraints.get(a, 0) * scale))
+                    for a in ATTRIBUTE_ORDER
+                }
+
+                # Rebuild training env for this stage
+                def _stage_env_factory(capacity: int, minov: dict[str, int]) -> Any:
+                    return lambda: _make_env(cap_override=capacity, min_override=minov)
+
+                venv = make_vec_env(
+                    _stage_env_factory(cap, min_override), n_envs=n_envs, seed=seed
+                )
+                if use_vecnorm:
+                    venv = VecNormalize(
+                        venv,
+                        norm_obs=False,
+                        norm_reward=True,
+                        clip_reward=10.0,
+                        gamma=0.99,
+                    )
+                # Swap env on model
+                model.set_env(venv)
+                self.stdout.write(self.style.WARNING(f"Training stage capacity={cap}"))
+                model.learn(
+                    total_timesteps=stage_steps,
+                    callback=[checkpoint_cb, eval_cb],
+                    reset_num_timesteps=False,
+                )
+        else:
+            model.learn(
+                total_timesteps=total_timesteps, callback=[checkpoint_cb, eval_cb]
+            )
 
         # Save model and VecNormalize stats
         model.save(save_path)
