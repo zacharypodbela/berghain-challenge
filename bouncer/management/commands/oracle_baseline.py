@@ -148,17 +148,30 @@ class Command(BaseCommand):
         generator = CorrelatedAttributeGenerator(cfg["attribute_statistics"])
 
         rejs: list[int] = []
+        failures = 0
         for i in range(n):
-            r = _oracle_rejections_for_trial(
-                generator,
-                constraints,
-                seed=seed0 + i * 17,
-                stdout=self.stdout,
-            )
-            rejs.append(int(r))
-            if (i + 1) % max(1, n // 10) == 0 or i == n - 1:
+            try:
+                r = _oracle_rejections_for_trial(
+                    generator,
+                    constraints,
+                    seed=seed0 + i * 17,
+                    stdout=self.stdout,
+                )
+            except RuntimeError as e:
+                failures += 1
                 self.stdout.write(
-                    f"  Progress: {i + 1}/{n} | last_rejections={r} | mean_so_far={np.mean(rejs):.2f}"
+                    self.style.ERROR(
+                        f"Episode {i + 1}/{n} failed (excluded): {type(e).__name__}: {e}"
+                    )
+                )
+                continue
+            rejs.append(int(r))
+            # Periodic progress based on successful episodes only
+            if (i + 1) % max(1, n // 10) == 0 or i == n - 1:
+                mean_so_far = float(np.mean(rejs)) if rejs else float("nan")
+                self.stdout.write(
+                    f"  Progress: {i + 1}/{n} | successes={len(rejs)} failures={failures} "
+                    f"| last_rejections={r} | mean_so_far={mean_so_far:.2f}"
                 )
 
         arr = np.asarray(rejs, dtype=np.float64)
@@ -172,5 +185,6 @@ class Command(BaseCommand):
         self.stdout.write("----------------------------")
         self.stdout.write(f"Scenario:     {scenario}")
         self.stdout.write(f"Episodes:     {n}")
+        self.stdout.write(f"Successes:    {len(rejs)}  Failures: {failures}")
         self.stdout.write(f"Mean rejects: {mean:.2f}  std={std:.2f}")
         self.stdout.write(f"p90:          {p90:.2f}  p95={p95:.2f}  p99={p99:.2f}")
