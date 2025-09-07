@@ -39,7 +39,7 @@ class Command(BaseCommand):
         model_path = str(opts["model_path"]).strip()
         scenario = int(opts["scenario"])
         n_episodes = int(opts["episodes"]) or 1
-        seed = int(opts["seed"]) or 0
+        seed = int(opts["seed"]) or 12345
         deterministic = bool(opts.get("deterministic", False))
 
         if not model_path.endswith(".zip"):

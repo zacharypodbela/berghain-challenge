@@ -2,6 +2,7 @@
 Django management command to run bouncer algorithms on games
 """
 
+from pyexpat import model
 import time
 from datetime import timedelta
 from typing import Any
@@ -112,6 +113,8 @@ class Command(BaseCommand):
                 else:
                     game = LocalGame.start_new_game(int(scenario))
                 game.tags.append(f"algorithm:{algorithm_name}")
+                if model_path:
+                    game.tags.append(f"model:{model_path}")
                 game.save()
                 self.stdout.write(
                     self.style.SUCCESS(
