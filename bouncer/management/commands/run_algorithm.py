@@ -111,8 +111,8 @@ class Command(BaseCommand):
                     game = RemoteGame.start_new_game(int(scenario))
                 else:
                     game = LocalGame.start_new_game(int(scenario))
-                    game.tags.append(f"algorithm:{algorithm_name}")
-                    game.save()
+                game.tags.append(f"algorithm:{algorithm_name}")
+                game.save()
                 self.stdout.write(
                     self.style.SUCCESS(
                         f"Created {'RemoteGame' if use_server else 'LocalGame'} {game.game_id} for scenario {game.scenario}"
