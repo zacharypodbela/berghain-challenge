@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from typing import Any
 
 import numpy as np
@@ -17,7 +18,13 @@ def _iter_games(
     statuses: set[str] | None,
     game_ids: set[str] | None,
     tags: set[str] | None,
-) -> Any:
+) -> Iterable[Game]:
+    """
+    Yield games matching provided filters.
+
+    Note: JSONField "contains" lookups for lists aren't supported on SQLite.
+    To stay backend‑agnostic, we apply tag filtering in Python (require ALL tags).
+    """
     qs = Game.objects.all().order_by("created_at")
     if scenarios:
         qs = qs.filter(scenario__in=list(scenarios))
@@ -25,11 +32,18 @@ def _iter_games(
         qs = qs.filter(status__in=list(statuses))
     if game_ids:
         qs = qs.filter(game_id__in=list(game_ids))
-    if tags:
-        # tags is JSON list; use contains to require any overlap
-        for t in list(tags):
-            qs = qs.filter(tags__contains=[t])
-    return qs
+
+    if not tags:
+        # No tag filtering requested; yield directly from the QuerySet iterator
+        yield from qs.iterator()
+        return
+
+    # Backend-agnostic: filter tags in Python. Require that game.tags contains all provided tags.
+    required = set(tags)
+    for game in qs.iterator():
+        game_tags = set(game.tags or [])
+        if required.issubset(game_tags):
+            yield game
 
 
 class Command(BaseCommand):
