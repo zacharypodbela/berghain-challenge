@@ -131,6 +131,12 @@ class Command(BaseCommand):
         parser.add_argument("--scenario", type=int, choices=[1, 2, 3], required=True)
         parser.add_argument("--episodes", type=int, default=200)
         parser.add_argument("--seed", type=int, default=123)
+        parser.add_argument(
+            "--csv-out",
+            type=str,
+            default="",
+            help="Optional CSV path (seed,best_score). Defaults to oracle_s<scenario>_n<episodes>_seed<seed>.csv",
+        )
 
     def handle(self, *args: Any, **opts: Any) -> None:
         scenario = int(opts["scenario"])
@@ -149,6 +155,7 @@ class Command(BaseCommand):
 
         rejs: list[int] = []
         failures = 0
+        seeds: list[int] = []
         for i in range(n):
             try:
                 r = _oracle_rejections_for_trial(
@@ -166,6 +173,7 @@ class Command(BaseCommand):
                 )
                 continue
             rejs.append(int(r))
+            seeds.append(int(seed0 + i * 17))
             # Periodic progress based on successful episodes only
             if (i + 1) % max(1, n // 10) == 0 or i == n - 1:
                 mean_so_far = float(np.mean(rejs)) if rejs else float("nan")
@@ -174,9 +182,37 @@ class Command(BaseCommand):
                     f"| last_rejections={r} | mean_so_far={mean_so_far:.2f}"
                 )
 
+        # Write raw results to CSV
+        csv_out = str(opts.get("csv_out") or "").strip()
+        if not csv_out:
+            csv_out = f"datasets/oracle_s{scenario}_n{n}_seed{seed0}.csv"
+        try:
+            import csv
+            import os
+
+            os.makedirs(os.path.dirname(csv_out) or ".", exist_ok=True)
+            with open(csv_out, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["seed", "best_score"])
+                for s, r in zip(seeds, rejs, strict=False):
+                    writer.writerow([s, int(r)])
+            self.stdout.write(self.style.SUCCESS(f"Wrote CSV -> {csv_out}"))
+        except Exception as e:
+            self.stdout.write(
+                self.style.ERROR(
+                    f"Failed to write CSV to {csv_out}: {type(e).__name__}: {e}"
+                )
+            )
+
+        # Summarize results and print to stdout
         arr = np.asarray(rejs, dtype=np.float64)
         mean = float(np.mean(arr))
         std = float(np.std(arr))
+        min_r = float(np.min(arr))
+        max_r = float(np.max(arr))
+        p01 = float(np.percentile(arr, 1.0))
+        p05 = float(np.percentile(arr, 5.0))
+        p10 = float(np.percentile(arr, 10.0))
         p90 = float(np.percentile(arr, 90.0))
         p95 = float(np.percentile(arr, 95.0))
         p99 = float(np.percentile(arr, 99.0))
@@ -185,6 +221,11 @@ class Command(BaseCommand):
         self.stdout.write("----------------------------")
         self.stdout.write(f"Scenario:     {scenario}")
         self.stdout.write(f"Episodes:     {n}")
-        self.stdout.write(f"Successes:    {len(rejs)}  Failures: {failures}")
-        self.stdout.write(f"Mean rejects: {mean:.2f}  std={std:.2f}")
-        self.stdout.write(f"p90:          {p90:.2f}  p95={p95:.2f}  p99={p99:.2f}")
+        self.stdout.write(f"Successes:    {len(rejs)}")
+        self.stdout.write(f"Failures:     {failures}")
+        self.stdout.write(
+            f"Rejects: mean={mean:.2f}  std={std:.2f}  min={min_r:.1f}  max={max_r:.1f}"
+        )
+        self.stdout.write(
+            f"p01={p01:.2f}  p05={p05:.2f}  p10={p10:.2f}  |  p90={p90:.2f}  p95={p95:.2f}  p99={p99:.2f}"
+        )
