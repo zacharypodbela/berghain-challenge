@@ -34,6 +34,7 @@ class Game(PolymorphicModel):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    tags = models.JSONField(default=list, blank=True)
 
     @property
     def admitted_count(self) -> int:

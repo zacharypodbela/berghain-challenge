@@ -257,6 +257,8 @@ class DbBerghainEnv(AbstractBerghainEnv):
         self, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[NDArray[np.float32], dict[str, Any]]:
         self.game = LocalGame.start_new_game(self.scenario)
+        self.game.tags.append("db-berghain-env")
+        self.game.save()
         self._db_person = Person.objects.get(game=self.game, decision__isnull=True)
         return super().reset(seed=seed, options=options)
 

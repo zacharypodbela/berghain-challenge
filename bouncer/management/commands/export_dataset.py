@@ -16,6 +16,7 @@ def _iter_games(
     scenarios: set[int] | None,
     statuses: set[str] | None,
     game_ids: set[str] | None,
+    tags: set[str] | None,
 ) -> Any:
     qs = Game.objects.all().order_by("created_at")
     if scenarios:
@@ -24,6 +25,10 @@ def _iter_games(
         qs = qs.filter(status__in=list(statuses))
     if game_ids:
         qs = qs.filter(game_id__in=list(game_ids))
+    if tags:
+        # tags is JSON list; use contains to require any overlap
+        for t in list(tags):
+            qs = qs.filter(tags__contains=[t])
     return qs
 
 
@@ -49,6 +54,12 @@ class Command(BaseCommand):
             type=str,
             default="",
             help="Comma-separated specific game_ids to include. Empty=all.",
+        )
+        parser.add_argument(
+            "--tags",
+            type=str,
+            default="",
+            help="Comma-separated tags to filter games by (matches games whose tags contain all provided). Empty=all.",
         )
 
     def handle(self, *args: Any, **options: Any) -> None:
@@ -77,7 +88,11 @@ class Command(BaseCommand):
         episode_idx = 0
         total_steps = 0
 
-        for game in _iter_games(scenarios, statuses, game_ids):
+        tag_set: set[str] | None = None
+        if options["tags"]:
+            tag_set = {s.strip() for s in options["tags"].split(",") if s.strip()}
+
+        for game in _iter_games(scenarios, statuses, game_ids, tag_set):
             # Prepare per-episode counters/state
             constraints = {c["attribute"]: int(c["minCount"]) for c in game.constraints}
             min_counts = {a: int(constraints.get(a, 0)) for a in ATTRIBUTE_ORDER}

@@ -219,6 +219,7 @@ python manage.py export_dataset --out data/export.npz [--scenarios 1,2] [--statu
 - `--scenarios <str>`: Comma-separated scenarios to include; empty=all.
 - `--statuses <str>`: Comma-separated statuses to include; empty=all.
 - `--games <str>`: Comma-separated specific `game_id`s to include; empty=all.
+- `--tags <str>`: Comma-separated tags to filter games by (matches games whose tags contain all provided). empty=all.
 
 Notes:
 
