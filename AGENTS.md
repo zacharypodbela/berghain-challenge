@@ -196,7 +196,7 @@ python manage.py pretrain_bc --datasets ds1.npz,ds2.npz --out models/bc_init.zip
 Evaluate a saved PPO model quickly in the in-memory simulator (no database I/O). Runs several episodes in `SimBerghainEnv` and reports summary stats.
 
 ```bash
-python manage.py eval_ppo --model-path models/ppo_model.zip --scenario 2 [--episodes 100] [--deterministic] [--seed 123]
+python manage.py eval_ppo --model-path models/ppo_model.zip --scenario 2 [--episodes 100] [--stochastic] [--seed 123]
 ```
 
 **Params:**
@@ -205,7 +205,7 @@ python manage.py eval_ppo --model-path models/ppo_model.zip --scenario 2 [--epis
 - `--scenario <int>`: Scenario to evaluate (choices: 1, 2, 3).
 - `--episodes <int>`: Number of episodes to roll out (default `50`).
 - `--seed <int>`: Base RNG seed; each episode uses `seed + ep` (default `123`).
-- `--deterministic`: If set, select greedy actions; otherwise sample stochastically.
+- `--stochastic`: If set, sample actions; default is deterministic (greedy actions).
 
 **Notes:**
 

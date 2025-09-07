@@ -30,9 +30,9 @@ class Command(BaseCommand):
             "--seed", type=int, default=123, help="Random seed for people generator"
         )
         parser.add_argument(
-            "--deterministic",
+            "--stochastic",
             action="store_true",
-            help="Use deterministic actions (default: stochastic)",
+            help="Sample actions stochastically (default: deterministic)",
         )
 
     def handle(self, *args: Any, **opts: Any) -> None:
@@ -40,7 +40,8 @@ class Command(BaseCommand):
         scenario = int(opts["scenario"])
         n_episodes = int(opts["episodes"]) or 1
         seed = int(opts["seed"]) or 12345
-        deterministic = bool(opts.get("deterministic", False))
+        # Default to deterministic unless --stochastic is provided
+        deterministic = not bool(opts.get("stochastic", False))
 
         if not model_path.endswith(".zip"):
             raise CommandError("--model-path must be a Stable-Baselines3 PPO .zip file")
