@@ -117,6 +117,26 @@ class Command(BaseCommand):
             help="Entropy regularization coefficient for PPO (exploration).",
         )
         parser.add_argument(
+            "--risk-beta",
+            type=float,
+            default=0.0,
+            help=(
+                "If > 0, enable risk-seeking weighting of advantages with this beta in exp(beta*(R-baseline))."
+            ),
+        )
+        parser.add_argument(
+            "--risk-wmax",
+            type=float,
+            default=20.0,
+            help="Clip factor for risk weights (max per-episode weight).",
+        )
+        parser.add_argument(
+            "--risk-ema",
+            type=float,
+            default=0.99,
+            help="EMA decay for baseline of episode returns (0.0..1.0).",
+        )
+        parser.add_argument(
             "--fail-penalty-scale",
             type=float,
             default=1.0,
@@ -157,6 +177,9 @@ class Command(BaseCommand):
         success_bonus: float = float(options["success_bonus"])
         minmeet_bonus: float = float(options["minmeet_bonus"])
         ent_coef: float = float(options["ent_coef"])
+        risk_beta: float = float(options.get("risk_beta", 0.0))
+        risk_wmax: float = float(options.get("risk_wmax", 20.0))
+        risk_ema: float = float(options.get("risk_ema", 0.99))
         fail_penalty_scale: float = float(options.get("fail_penalty_scale", 1.0))
         success_bonus_per_saved: float = float(
             options.get("success_bonus_per_saved", 0.0)
@@ -307,6 +330,18 @@ class Command(BaseCommand):
                 deterministic=True,
             )
 
+        # Optional risk-seeking weighting callback
+        callbacks: list[Any] = [checkpoint_cb, eval_cb]
+        if risk_beta > 0.0:
+            from bouncer.rl.callbacks import RiskSeekingWeightCallback
+
+            callbacks.insert(
+                0,
+                RiskSeekingWeightCallback(
+                    beta=risk_beta, w_max=risk_wmax, ema_decay=risk_ema
+                ),
+            )
+
         # Train (with optional curriculum)
         if cur_str:
             caps = [int(x) for x in cur_str.split(",") if x.strip()]
@@ -351,13 +386,11 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.WARNING(f"Training stage capacity={cap}"))
                 model.learn(
                     total_timesteps=stage_steps,
-                    callback=[checkpoint_cb, eval_cb],
+                    callback=callbacks,
                     reset_num_timesteps=False,
                 )
         else:
-            model.learn(
-                total_timesteps=total_timesteps, callback=[checkpoint_cb, eval_cb]
-            )
+            model.learn(total_timesteps=total_timesteps, callback=callbacks)
 
         # Save model and VecNormalize stats
         model.save(save_path)

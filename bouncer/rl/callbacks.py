@@ -87,3 +87,104 @@ class PercentileEvalCallback(BaseCallback):
                 )
 
         return True
+
+
+class RiskSeekingWeightCallback(BaseCallback):
+    """Episode-weighted advantages for risk-seeking PPO.
+
+    For each rollout, compute per-episode returns (within the rollout window) per env
+    using episode_starts boundaries. Convert each episode return R into a weight
+    w = exp(beta * (R - baseline)). Clip to [1e-6, w_max]. Multiply PPO's rollout
+    advantages by these weights before the training update.
+
+    Notes:
+    - baseline is an exponential moving average of observed episode returns.
+    - Episodes that span multiple rollouts are approximated by the partial return
+      within the current rollout window.
+    - This callback assumes the algorithm exposes `rollout_buffer` with
+      `.rewards` and `.episode_starts` shaped (n_steps, n_envs), and `.advantages`
+      of the same shape after GAE computation.
+    """
+
+    def __init__(
+        self, beta: float = 1e-4, w_max: float = 20.0, ema_decay: float = 0.99
+    ) -> None:
+        super().__init__()
+        self.beta = float(beta)
+        self.w_max = float(max(1.0, w_max))
+        self.ema_decay = float(ema_decay)
+        self.baseline: float | None = None
+        # Running return per env across rollouts for episodes that started in a previous buffer
+        from numpy.typing import NDArray
+
+        self._carry: NDArray[np.float64] | None = None
+
+    def _on_rollout_end(self) -> None:
+        # Access rollout buffer
+        algo = self.model
+        # Defensive: only operate if buffer and fields exist
+        buf = getattr(algo, "rollout_buffer", None)
+        if buf is None:
+            return
+        rewards = getattr(buf, "rewards", None)
+        starts = getattr(buf, "episode_starts", None)
+        adv = getattr(buf, "advantages", None)
+        if rewards is None or starts is None or adv is None:
+            return
+
+        # Expect shapes (n_steps, n_envs)
+        try:
+            n_steps, n_envs = rewards.shape
+        except Exception:
+            return
+
+        # Initialize carry if first run or env count changed
+        if self._carry is None or self._carry.shape != (n_envs):
+            self._carry = np.zeros((n_envs,), dtype=np.float64)
+
+        # Build weight matrix; apply weights only to steps that belong to episodes
+        # that end within this rollout, using full episode return (carry + segment sum).
+        weights = np.ones_like(rewards, dtype=np.float32)
+        completed_returns: list[float] = []
+
+        for e in range(n_envs):
+            seg_start = 0
+            # If a new episode starts at t=0, previous episode ended before; reset carry
+            if bool(starts[0, e]):
+                self._carry[e] = 0.0
+            # Iterate and detect boundaries where a new episode begins (so previous ended)
+            for t in range(1, n_steps):
+                if bool(starts[t, e]):
+                    seg_sum = float(np.sum(rewards[seg_start:t, e]))
+                    full_R = float(self._carry[e] + seg_sum)
+                    completed_returns.append(full_R)
+                    # Compute weight from baseline
+                    if self.baseline is None:
+                        w = 1.0
+                    else:
+                        w = float(np.exp(self.beta * (full_R - self.baseline)))
+                    w = float(np.clip(w, 1e-6, self.w_max))
+                    weights[seg_start:t, e] = w
+                    # Reset carry and start next segment at t
+                    self._carry[e] = 0.0
+                    seg_start = t
+            # Tail segment (possibly incomplete episode): accumulate into carry only
+            tail_sum = float(np.sum(rewards[seg_start:n_steps, e]))
+            self._carry[e] += tail_sum
+
+        # Update baseline EMA using full returns of completed episodes this rollout
+        if completed_returns:
+            mean_R = float(np.mean(completed_returns))
+            if self.baseline is None:
+                self.baseline = mean_R
+            else:
+                self.baseline = (
+                    self.ema_decay * self.baseline + (1.0 - self.ema_decay) * mean_R
+                )
+
+        # Scale advantages in-place
+        buf.advantages *= weights
+
+    def _on_step(self) -> bool:
+        # Not used; weights are applied at rollout end.
+        return True

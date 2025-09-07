@@ -119,6 +119,10 @@ python manage.py train_ppo --scenario 1 --total-timesteps 200000 --n-envs 8 --lo
 - `--stage-steps <int>`: Timesteps per curriculum stage.
 - `--no-vecnorm`: Disable reward normalization (VecNormalize).
 - `--gamma <float>` / `--gae-lambda <float>` / `--n-steps <int>` / `--ent-coef <float>`: PPO hyperparameters.
+- Risk-seeking weighting (tilt learning toward best episodes):
+  - `--risk-beta <float>`: If > 0, enable exp-utility episode weighting with this beta; weights ∝ exp(beta · (R − baseline)).
+  - `--risk-wmax <float>`: Max per-episode weight (clip) to keep updates stable (default `20.0`).
+  - `--risk-ema <float>`: EMA decay for baseline of episode returns (default `0.99`).
 - Reward shaping (training only; eval uses true rewards):
   - `--shape-coef <float>`: Dense reward for reducing total deficits between steps.
   - `--nonhelp-penalty <float>`: Extra penalty when an accept does not reduce any deficits while deficits remain.
@@ -136,6 +140,33 @@ python manage.py train_ppo --scenario 1 --total-timesteps 200000 --n-envs 8 --lo
 - Curriculum scales minimum counts proportionally to the staged capacity.
 - When `--init-from` is provided, weights are loaded into a fresh PPO to match current rollout shape/hyperparams.
 - Training reward shaping applies only to the training envs. Evaluation envs are unshaped (true task rewards). If `--eval-percentile` is set, percentile is computed over true rewards.
+
+### Sweep Risk Beta (`sweep_risk_beta`)
+
+Sweep several `--risk-beta` values and train a model for each, selecting the best by percentile reward during training.
+
+```bash
+python manage.py sweep_risk_beta --scenario 2 --init-from models/ppo_bc_s2_200.zip \
+  --betas 0,0.0001,0.0002,0.0005 \
+  --total-timesteps 800000 --n-envs 4 --n-steps 8192 --gamma 0.9995 --gae-lambda 0.995 \
+  --ent-coef 0.02 --shape-coef 6.0 --nonhelp-penalty 1.0 --success-bonus 40000 --minmeet-bonus 2.0 \
+  --fail-penalty-scale 0.5 --success-bonus-per-saved 2.0 --late-reject-weight 0.5 \
+  --eval-freq 50000 --eval-episodes 40 --eval-percentile 95 --no-vecnorm \
+  --log-root runs/sweeps/risk_beta_s2 --save-root models/sweeps/risk_beta_s2
+```
+
+**Params:**
+
+- `--scenario <int>` / `--init-from <path>` / `--betas <str>`: Scenario, seed model, and comma-separated beta list.
+- Common PPO/train flags: `--total-timesteps`, `--n-envs`, `--n-steps`, `--gamma`, `--gae-lambda`, `--ent-coef`.
+- Reward shaping: `--shape-coef`, `--nonhelp-penalty`, `--success-bonus`, `--minmeet-bonus`, `--fail-penalty-scale`, `--success-bonus-per-saved`, `--late-reject-weight`.
+- Eval: `--eval-freq`, `--eval-episodes`, `--eval-percentile` (default `95`).
+- `--no-vecnorm`: Disable reward normalization.
+- Paths: `--log-root`, `--save-root` for per-beta artifacts.
+
+**Notes:**
+
+- For each beta, this calls `train_ppo` with `--risk-beta <beta>` and `--eval-percentile` set, then reads `<log_dir>/eval/evaluations_percentile.npz` to pick that run’s best percentile score. The overall best across betas is reported with its checkpoint at `<log_dir>/best/best_model.zip`.
 
 ### Pretrain BC (`pretrain_bc`)
 
