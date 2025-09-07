@@ -134,6 +134,10 @@ python manage.py train_ppo --scenario 1 --total-timesteps 200000 --n-envs 8 --lo
 - Eval selection:
   - `--eval-freq <int>` / `--eval-episodes <int>`: Eval cadence and episodes per eval.
   - `--eval-percentile <float>`: If > 0 (e.g., `90` or `95`), selects the best checkpoint by that reward percentile instead of mean.
+  - `--no-restore-best`: Disables default behavior where at the end of training, the best-eval checkpoint is restored before saving `--save-path`.
+- Early stop:
+  - `--early-stop-patience <int>` stops training when the eval metric has not improved for this many evals
+  - `--early-stop-min-delta <float>` specify how much the eval metric must have improved by to avoid triggering the early stop. Defaults to 0 (any improvement will avoid early stop).
 
 **Notes:**
 

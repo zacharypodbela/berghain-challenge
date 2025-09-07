@@ -158,6 +158,30 @@ class Command(BaseCommand):
                 "Extra per-reject penalty scaled by endgame slack: -w*(1 - slack_frac) (training only)."
             ),
         )
+        parser.add_argument(
+            "--no-restore-best",
+            action="store_true",
+            help=(
+                "Do not restore the best-eval checkpoint at the end. By default, the best checkpoint "
+                "(mean or percentile) is loaded before saving --save-path."
+            ),
+        )
+        parser.add_argument(
+            "--early-stop-patience",
+            type=int,
+            default=0,
+            help=(
+                "If > 0, stop training when eval metric has not improved for this many evals."
+            ),
+        )
+        parser.add_argument(
+            "--early-stop-min-delta",
+            type=float,
+            default=0.0,
+            help=(
+                "Minimum improvement (absolute) required to reset early-stop patience."
+            ),
+        )
 
     def handle(self, *args: Any, **options: Any) -> None:
         scenario: int = int(options["scenario"])
@@ -342,6 +366,18 @@ class Command(BaseCommand):
                 ),
             )
 
+        # Early stopping on no improvement
+        early_patience = int(options.get("early_stop_patience", 0) or 0)
+        early_delta = float(options.get("early_stop_min_delta", 0.0) or 0.0)
+        if early_patience > 0:
+            from bouncer.rl.callbacks import EarlyStopOnNoImprovement
+
+            callbacks.append(
+                EarlyStopOnNoImprovement(
+                    eval_cb, patience=early_patience, min_delta=early_delta, verbose=1
+                )
+            )
+
         # Train (with optional curriculum)
         if cur_str:
             caps = [int(x) for x in cur_str.split(",") if x.strip()]
@@ -391,6 +427,27 @@ class Command(BaseCommand):
                 )
         else:
             model.learn(total_timesteps=total_timesteps, callback=callbacks)
+
+        # Restore best checkpoint before saving final model if not disabled
+        best_path = os.path.join(log_dir, "best", "best_model.zip")
+        restore_best = not bool(options.get("no_restore_best", False))
+        if restore_best and os.path.exists(best_path):
+            self.stdout.write(
+                self.style.WARNING(
+                    f"Restoring best checkpoint from {best_path} before saving"
+                )
+            )
+            try:
+                best_loaded = PPO.load(best_path)
+                model.policy.load_state_dict(
+                    best_loaded.policy.state_dict(), strict=False
+                )
+            except Exception as e:  # pragma: no cover
+                self.stdout.write(
+                    self.style.ERROR(
+                        f"Failed to restore best: {e}. Saving current model instead."
+                    )
+                )
 
         # Save model and VecNormalize stats
         model.save(save_path)
