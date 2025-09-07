@@ -188,3 +188,60 @@ class RiskSeekingWeightCallback(BaseCallback):
     def _on_step(self) -> bool:
         # Not used; weights are applied at rollout end.
         return True
+
+
+class EarlyStopOnNoImprovement(BaseCallback):
+    """Stop training when the eval metric does not improve for `patience` evals.
+
+    Works with either SB3's EvalCallback or our PercentileEvalCallback by inspecting
+    `.best_metric` and `.timesteps` on the eval callback instance.
+    """
+
+    def __init__(
+        self,
+        eval_cb: BaseCallback,
+        *,
+        patience: int = 5,
+        min_delta: float = 0.0,
+        verbose: int = 1,
+    ) -> None:
+        super().__init__(verbose=verbose)
+        self.eval_cb = eval_cb
+        self.patience = int(max(1, patience))
+        self.min_delta = float(min_delta)
+        self._last_best: float | None = None
+        self._last_count: int = 0
+        self._bad_evals: int = 0
+
+    def _on_step(self) -> bool:
+        # Detect when an eval just ran by comparing lengths
+        timesteps = getattr(self.eval_cb, "timesteps", None)
+        best = getattr(self.eval_cb, "best_metric", None)
+        if timesteps is None or best is None:
+            return True  # eval callback not initialized yet
+        count = len(timesteps)
+        if count > self._last_count:
+            # A new eval occurred
+            improved = False
+            if self._last_best is None:
+                improved = True
+            else:
+                improved = bool((float(best) - float(self._last_best)) > self.min_delta)
+            if improved:
+                self._bad_evals = 0
+                self._last_best = float(best)
+                if self.verbose:
+                    print(f"EarlyStop: improvement detected (best={best:.4f})")
+            else:
+                self._bad_evals += 1
+                if self.verbose:
+                    print(
+                        f"EarlyStop: no improvement ({self._bad_evals}/{self.patience}) "
+                        f"best={best:.4f}"
+                    )
+                if self._bad_evals >= self.patience:
+                    if self.verbose:
+                        print("EarlyStop: stopping training due to no improvement")
+                    return False
+            self._last_count = count
+        return True
