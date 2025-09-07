@@ -252,3 +252,28 @@ python manage.py export_game_csv <GAME_ID> [--output game_<GAME_ID>.csv]
 
 - `<GAME_ID>`: Required game UUID.
 - `--output <str>`: Output CSV path (default `game_<GAME_ID>.csv`).
+
+### Oracle Baseline (`oracle_baseline`)
+
+Estimate the best-achievable (lower-bound) rejections with perfect foresight for a scenario by finding the earliest stream prefix where it is possible to select exactly `CAPACITY` people that satisfy all minima.
+
+```bash
+python manage.py oracle_baseline --scenario 2 [--episodes 200] [--seed 123]
+```
+
+**Params:**
+
+- `--scenario <int>`: Scenario to evaluate (choices: 1, 2, 3).
+- `--episodes <int>`: Number of independent trials to simulate (default `200`).
+- `--seed <int>`: Base RNG seed; each episode uses an offset of this seed (default `123`).
+
+**Behavior:**
+
+- For each episode, samples a stream of people via the in-memory generator and binary-searches the minimum prefix length `t*` such that there exists a subset of exactly `CAPACITY` people within the first `t*` that meets all per-attribute minima.
+- Feasibility is checked via OR-Tools CP-SAT. It pre-filters obvious infeasible prefixes and uses a constructive greedy to short-circuit easy feasible cases.
+- Outputs per-episode progress and a summary of lower-bound rejections `t* - CAPACITY` (mean/std, p90/p95/p99).
+
+**Notes:**
+
+- Requires `ortools` (already listed in `requirements.txt`). The command raises an error if CP-SAT returns an unknown/timeout status rather than silently treating it as infeasible.
+- Feasibility is modeled on “useful” people (those with at least one constrained attribute); remaining slots can always be filled with unconstrained “filler” people to reach exactly `CAPACITY` if minima are satisfied.
