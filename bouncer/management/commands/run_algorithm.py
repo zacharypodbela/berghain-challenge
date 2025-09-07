@@ -2,7 +2,6 @@
 Django management command to run bouncer algorithms on games
 """
 
-from pyexpat import model
 import time
 from datetime import timedelta
 from typing import Any

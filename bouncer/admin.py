@@ -36,6 +36,39 @@ class GameTypeListFilter(admin.SimpleListFilter):
         return queryset
 
 
+class TagsListFilter(admin.SimpleListFilter):
+    title = "Tags"
+    parameter_name = "tag"
+
+    def lookups(
+        self, request: HttpRequest, model_admin: admin.ModelAdmin
+    ) -> list[tuple[str, str]]:
+        # Collect unique tags from all games
+        unique: set[str] = set()
+        for tags in Game.objects.exclude(tags=[]).values_list("tags", flat=True):
+            if isinstance(tags, list):
+                for t in tags:
+                    if (
+                        isinstance(t, str)
+                        and t.strip()
+                        and not t.lower().startswith("seed:")
+                    ):
+                        unique.add(t)
+        choices = sorted(unique)
+        # Include a '(no tags)' option
+        return [(t, t) for t in choices] + [("__none__", "(no tags)")]
+
+    def queryset(
+        self, request: HttpRequest, queryset: QuerySet[Game]
+    ) -> QuerySet[Game]:
+        value = self.value()
+        if value == "__none__":
+            return queryset.filter(tags=[])
+        if value:
+            return queryset.filter(tags__contains=[value])
+        return queryset
+
+
 @admin.register(Game)
 class GameAdmin(admin.ModelAdmin):
     list_display = [
@@ -49,8 +82,15 @@ class GameAdmin(admin.ModelAdmin):
         "view_people",
         "view_on_challenge_site",
         "created_at",
+        "tags_display",
     ]
-    list_filter = ["scenario", "status", GameTypeListFilter, "created_at"]
+    list_filter = [
+        "scenario",
+        "status",
+        GameTypeListFilter,
+        TagsListFilter,
+        "created_at",
+    ]
     search_fields = ["game_id"]
     readonly_fields = [
         "created_at",
@@ -83,6 +123,11 @@ class GameAdmin(admin.ModelAdmin):
         return obj.game_id
 
     game_id_display.short_description = "Game ID"  # type: ignore [attr-defined]
+
+    def tags_display(self, obj: Game) -> str:
+        return ", ".join(obj.tags or [])
+
+    tags_display.short_description = "Tags"  # type: ignore [attr-defined]
 
     def start_scenario_1(self, request: HttpRequest, queryset: QuerySet[Game]) -> None:
         """Admin action to start a new scenario 1 game"""
