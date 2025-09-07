@@ -61,5 +61,5 @@ MANIFEST
 
 # Model Runs
 runs/
-*/sweeps/*
+models/sweeps/
 datasets/
