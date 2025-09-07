@@ -209,6 +209,16 @@
             <strong>Final Score:</strong> <span>{{ game.rejected_count }} rejections</span>
         </div>
         {% endif %}
+        {% if game.tags %}
+        <div class="metadata-item">
+            <strong>Tags:</strong>
+            <span>
+                {% for tag in game.tags %}
+                    <span class="status-badge">{{ tag }}</span>{% if not forloop.last %} {% endif %}
+                {% endfor %}
+            </span>
+        </div>
+        {% endif %}
     </div>
 </div>
 

@@ -219,8 +219,9 @@ class GameAdmin(admin.ModelAdmin):
         duration = None
         if game.completed_at and game.created_at:
             delta = game.completed_at - game.created_at
-            hours = delta.total_seconds() // 3600
-            minutes = (delta.total_seconds() % 3600) // 60
+            total_secs = int(max(0.0, delta.total_seconds()))
+            hours = total_secs // 3600
+            minutes = (total_secs % 3600) // 60
             if hours > 0:
                 duration = f"{int(hours)}h {int(minutes)}m"
             else:
