@@ -1,6 +1,7 @@
 from typing import Any
 
 from django.contrib import admin, messages
+from django.contrib.contenttypes.models import ContentType
 from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404
@@ -11,6 +12,28 @@ from django.utils.safestring import SafeString
 
 from .constants import CAPACITY, REJECTION_LIMIT
 from .models import Game, LocalGame, Person, RemoteGame
+
+
+class GameTypeListFilter(admin.SimpleListFilter):
+    title = "Type"
+    parameter_name = "game_type"
+
+    def lookups(
+        self, request: HttpRequest, model_admin: admin.ModelAdmin
+    ) -> list[tuple[str, str]]:
+        return [("remote", "Remote"), ("local", "Local")]
+
+    def queryset(
+        self, request: HttpRequest, queryset: QuerySet[Game]
+    ) -> QuerySet[Game]:
+        value = self.value()
+        if value == "remote":
+            ctype = ContentType.objects.get_for_model(RemoteGame)
+            return queryset.filter(polymorphic_ctype=ctype)
+        if value == "local":
+            ctype = ContentType.objects.get_for_model(LocalGame)
+            return queryset.filter(polymorphic_ctype=ctype)
+        return queryset
 
 
 @admin.register(Game)
@@ -27,7 +50,7 @@ class GameAdmin(admin.ModelAdmin):
         "view_on_challenge_site",
         "created_at",
     ]
-    list_filter = ["scenario", "status", "created_at"]
+    list_filter = ["scenario", "status", GameTypeListFilter, "created_at"]
     search_fields = ["game_id"]
     readonly_fields = [
         "created_at",
