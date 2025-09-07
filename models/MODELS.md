@@ -50,6 +50,10 @@
 | Rejected | mean=1002.6 std=45.1                             |
 | Outcomes | success=99 unmet_at_capacity=1 rejection_limit=0 |
 
+## ppo_bc_s2_oracle500
+
+[IN PROGRESS]
+
 # Scenario 2
 
 **Current Best (Always Win):** runs/ppo_s2_bc200_cur_nv/best/best_model.zip
@@ -195,7 +199,7 @@ Episodes: 100
 | Rejected | 3797.5     | 161.4                | 3476.2            | 3535.6    | 3554.0    | 4008.7    | 4043.1   | 4177.2   | 3293.0    | 4202.0   |
 | Outcomes | success=10 | unmet_at_capacity=90 | rejection_limit=0 |
 
-## ppo_bc_s2_oracle500.zip
+## ppo_bc_s2_oracle500
 
 Episodes: 1000
 
@@ -215,12 +219,12 @@ Training Configuration:
 python manage.py train_ppo --scenario 2 --init-from models/ppo_bc_s2_oracle500.zip --total-timesteps 800000 --n-envs 4 --gamma 0.9997 --gae-lambda 0.997 --n-steps 8192 --ent-coef 0.05 --shape-coef 6.0 --nonhelp-penalty 0.3 --success-bonus 40000 --minmeet-bonus 4.0 --fail-penalty-scale 0.15 --success-bonus-per-saved 10.0 --late-reject-weight 1.0 --eval-freq 50000 --eval-episodes 300 --eval-percentile 99 --no-vecnorm --log-dir runs/ppo_s2_oracle_p99_push --save-path models/ppo_s2_oracle_p99_push.zip
 ```
 
-Episodes: 100
+Episodes: 1000
 
-|          | Mean       | Std                  | P01               | P05       | P10       | P90       | P95      | P99      | Min       | Max      |
-| -------- | ---------- | -------------------- | ----------------- | --------- | --------- | --------- | -------- | -------- | --------- | -------- |
-| Reward   | -21641.85  | 5999.13              | -24067.21         | -23907.50 | -23843.60 | -21372.10 | -3655.25 | -3362.92 | -24088.00 | -3256.00 |
-| length   | 4641.9     | 172.5                | 4301.5            | 4363.9    | 4402.8    | 4871.5    | 4927.6   | 5067.2   | 4256.0    | 5088.0   |
-| Admitted | 1000.0     | 0.0                  | 1000.0            | 1000.0    | 1000.0    | 1000.0    | 1000.0   | 1000.0   | 1000.0    | 1000.0   |
-| Rejected | 3641.8     | 172.5                | 3301.5            | 3363.9    | 3402.8    | 3871.5    | 3927.6   | 4067.2   | 3256.0    | 4088.0   |
-| Outcomes | success=10 | unmet_at_capacity=90 | rejection_limit=0 |
+|          | Mean       | Std                   | P01               | P05       | P10       | P90       | P95      | P99      | Min       | Max      |
+| -------- | ---------- | --------------------- | ----------------- | --------- | --------- | --------- | -------- | -------- | --------- | -------- |
+| Reward   | -22567.19  | 4485.48               | -24048.06         | -23911.00 | -23849.20 | -23350.90 | -3991.95 | -3441.87 | -24365.00 | -3254.00 |
+| length   | 4627.2     | 176.9                 | 4253.9            | 4350.9    | 4400.7    | 4854.0    | 4919.0   | 5048.1   | 4076.0    | 5365.0   |
+| Admitted | 1000.0     | 0.0                   | 1000.0            | 1000.0    | 1000.0    | 1000.0    | 1000.0   | 1000.0   | 1000.0    | 1000.0   |
+| Rejected | 3627.2     | 176.9                 | 3253.9            | 3350.9    | 3400.7    | 3854.0    | 3919.0   | 4048.1   | 3076.0    | 4365.0   |
+| Outcomes | success=53 | unmet_at_capacity=947 | rejection_limit=0 |
