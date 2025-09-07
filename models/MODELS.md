@@ -1,6 +1,6 @@
 # Scenario 1
 
-**Current Best:** runs/ppo_s1_bc_v1/best/best_model.zip
+**Current Best (Always Win):** runs/ppo_s1_bc_v1/best/best_model.zip
 
 ## ppo_s1_bc_v1
 
@@ -52,7 +52,8 @@
 
 # Scenario 2
 
-**Current Best:** runs/ppo_s2_bc200_cur_nv/best/best_model.zip
+**Current Best (Always Win):** runs/ppo_s2_bc200_cur_nv/best/best_model.zip
+**Current Best (Risk On / Go For High Score):** runs/ppo_s2_bc200_riskon_p99_push/best/best_model.zip
 
 ## ppo_s2_bc50_cur
 
@@ -161,3 +162,35 @@ Episodes: 1000
 | Admitted | 1000.0      | 0.0                 | 1000.0            | 1000.0   | 1000.0   | 1000.0   | 1000.0   | 1000.0   | 1000.0    | 1000.0   |
 | Rejected | 4948.8      | 201.1               | 4478.0            | 4602.9   | 4693.0   | 5206.0   | 5269.1   | 5415.1   | 4349.0    | 5517.0   |
 | Outcomes | success=999 | unmet_at_capacity=1 | rejection_limit=0 |
+
+## ppo_s2_bc200_riskon_p99_push
+
+Training Configuration:
+
+```bash
+python manage.py train_ppo --scenario 2 --init-from runs/ppo_s2_bc200_riskon_p95_push/best/best_model.zip --total-timesteps 800000 --n-envs 4 --gamma 0.9997 --gae-lambda 0.997 --n-steps 8192 --ent-coef 0.05 --shape-coef 6.0 --nonhelp-penalty 0.3 --success-bonus 40000 --minmeet-bonus 4.0 --fail-penalty-scale 0.15 --success-bonus-per-saved 10.0 --late-reject-weight 1.0 --eval-freq 50000 --eval-episodes 300 --eval-percentile 99 --no-vecnorm --log-dir runs/ppo_s2_bc200_riskon_p99_push --save-path models/ppo_s2_bc200_riskon_p99_push.zip
+```
+
+Model: models/ppo_s2_bc200_riskon_p99_push.zip
+Scenario: 2
+Episodes: 100
+
+|          | Mean      | Std                   | P01               | P05       | P10       | P90       | P95       | P99       | Min       | Max       |
+| -------- | --------- | --------------------- | ----------------- | --------- | --------- | --------- | --------- | --------- | --------- | --------- |
+| Reward   | -23480.99 | 145.17                | -23793.30         | -23699.30 | -23658.50 | -23305.70 | -23247.75 | -23191.15 | -23823.00 | -23008.00 |
+| length   | 4481.0    | 145.2                 | 4191.1            | 4247.8    | 4305.7    | 4658.5    | 4699.3    | 4793.3    | 4008.0    | 4823.0    |
+| Admitted | 1000.0    | 0.0                   | 1000.0            | 1000.0    | 1000.0    | 1000.0    | 1000.0    | 1000.0    | 1000.0    | 1000.0    |
+| Rejected | 3481.0    | 145.2                 | 3191.2            | 3247.8    | 3305.7    | 3658.5    | 3699.3    | 3793.3    | 3008.0    | 3823.0    |
+| Outcomes | success=0 | unmet_at_capacity=100 | rejection_limit=0 |
+
+Model: **runs/ppo_s2_bc200_riskon_p99_push/best/best_model.zip**
+Scenario: 2
+Episodes: 100
+
+|          | Mean       | Std                  | P01               | P05       | P10       | P90       | P95      | P99      | Min       | Max      |
+| -------- | ---------- | -------------------- | ----------------- | --------- | --------- | --------- | -------- | -------- | --------- | -------- |
+| Reward   | -21797.46  | 6032.77              | -24177.25         | -24043.05 | -23980.80 | -21531.00 | -3711.90 | -3578.12 | -24202.00 | -3293.00 |
+| length   | 4797.5     | 161.4                | 4476.1            | 4535.6    | 4554.0    | 5008.7    | 5043.1   | 5177.2   | 4293.0    | 5202.0   |
+| Admitted | 1000.0     | 0.0                  | 1000.0            | 1000.0    | 1000.0    | 1000.0    | 1000.0   | 1000.0   | 1000.0    | 1000.0   |
+| Rejected | 3797.5     | 161.4                | 3476.2            | 3535.6    | 3554.0    | 4008.7    | 4043.1   | 4177.2   | 3293.0    | 4202.0   |
+| Outcomes | success=10 | unmet_at_capacity=90 | rejection_limit=0 |
