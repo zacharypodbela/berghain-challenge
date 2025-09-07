@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any, TextIO
 
 import numpy as np
 from django.core.management.base import BaseCommand
+from django.utils import timezone
 from ortools.sat.python import cp_model
 
 from bouncer.constants import CAPACITY, REJECTION_LIMIT, SCENARIO_CONFIGS
 from bouncer.generate_attributes import CorrelatedAttributeGenerator
+from bouncer.models import LocalGame, Person
 
 
 def _solve_prefix_feasible(
@@ -91,12 +94,118 @@ def _solve_prefix_feasible(
     raise RuntimeError(f"CP-SAT could not determine feasibility (status={status_name})")
 
 
+def _find_feasible_selection(
+    population: list[dict[str, bool]],
+    constraints: dict[str, int],
+    capacity: int,
+) -> set[int] | None:
+    """Find one feasible selection of exactly `capacity` indices meeting minima.
+
+    Returns a set of global indices into the population (0..len(pop)-1) if feasible,
+    otherwise None. Uses the same reductions as feasibility: first a greedy
+    constructive attempt on useful people, then CP-SAT to extract a certificate,
+    then fills up to exact capacity with earliest remaining people.
+    """
+    needed_attrs = list(constraints.keys())
+    # Early necessary check
+    for a in needed_attrs:
+        have = sum(1 for p in population if bool(p.get(a, False)))
+        if have < int(constraints[a]):
+            return None
+
+    useful_indices: list[int] = []
+    filler_indices: list[int] = []
+    for i, p in enumerate(population):
+        if any(bool(p.get(a, False)) for a in needed_attrs):
+            useful_indices.append(i)
+        else:
+            filler_indices.append(i)
+
+    M = [
+        [1 if bool(population[i].get(a, False)) else 0 for a in needed_attrs]
+        for i in useful_indices
+    ]
+
+    # Greedy attempt
+    deficits = {a: int(constraints[a]) for a in needed_attrs}
+    sel_useful: list[int] = []
+    remaining = set(range(len(useful_indices)))
+    while (
+        remaining
+        and any(deficits[a] > 0 for a in needed_attrs)
+        and len(sel_useful) < capacity
+    ):
+        best_i = None
+        best_gain = -1
+        for i in list(remaining):
+            gain = 0
+            row = M[i]
+            for j, a in enumerate(needed_attrs):
+                if deficits[a] > 0 and row[j] == 1:
+                    gain += 1
+            if gain > best_gain:
+                best_gain = gain
+                best_i = i
+        if best_i is None or best_gain <= 0:
+            break
+        sel_useful.append(best_i)
+        remaining.remove(best_i)
+        for j, a in enumerate(needed_attrs):
+            if M[best_i][j] == 1 and deficits[a] > 0:
+                deficits[a] -= 1
+    if all(deficits[a] <= 0 for a in needed_attrs) and len(sel_useful) <= capacity:
+        sel_global: list[int] = [useful_indices[i] for i in sel_useful]
+        # Fill to capacity with earliest remaining (useful not selected first, then fillers)
+        remaining_globals = [
+            useful_indices[i] for i in sorted(remaining)
+        ] + filler_indices
+        for gi in remaining_globals:
+            if len(sel_global) >= capacity:
+                break
+            if gi not in sel_global:
+                sel_global.append(gi)
+        return set(sel_global) if len(sel_global) == capacity else None
+
+    # CP-SAT certificate on useful subset
+    try:
+        from ortools.sat.python import cp_model
+
+        model = cp_model.CpModel()
+        x = [model.NewBoolVar(f"x_{i}") for i in range(len(useful_indices))]
+        model.Add(sum(x) <= int(capacity))
+        for j, a in enumerate(needed_attrs):
+            model.Add(
+                sum(x[i] * int(M[i][j]) for i in range(len(useful_indices)))
+                >= int(constraints[a])
+            )
+        solver = cp_model.CpSolver()
+        solver.parameters.max_time_in_seconds = 5.0
+        res = solver.Solve(model)
+        if res not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            return None if res == cp_model.INFEASIBLE else None
+        chosen_useful = [
+            i for i in range(len(useful_indices)) if solver.Value(x[i]) == 1
+        ]
+        sel_global = [useful_indices[i] for i in chosen_useful]
+        # Fill to capacity
+        used = set(sel_global)
+        for gi in useful_indices + filler_indices:
+            if len(sel_global) >= capacity:
+                break
+            if gi not in used:
+                sel_global.append(gi)
+                used.add(gi)
+        return set(sel_global) if len(sel_global) == capacity else None
+    except Exception:
+        return None
+
+
 def _oracle_rejections_for_trial(
     generator: CorrelatedAttributeGenerator,
     constraints: dict[str, int],
     seed: int,
     stdout: TextIO,
-) -> int:
+) -> tuple[int, list[dict[str, bool]]]:
     # Start with lower bound CAPACITY and upper bound max_people
     low = CAPACITY  # Low is unknown feasibility
     hi = REJECTION_LIMIT + CAPACITY  # Hi is always feasible
@@ -118,7 +227,7 @@ def _oracle_rejections_for_trial(
         else:
             low = mid + 1
 
-    return int(hi - CAPACITY)
+    return int(hi - CAPACITY), people[:hi]
 
 
 class Command(BaseCommand):
@@ -136,6 +245,11 @@ class Command(BaseCommand):
             type=str,
             default="",
             help="Optional CSV path (seed,best_score). Defaults to oracle_s<scenario>_n<episodes>_seed<seed>.csv",
+        )
+        parser.add_argument(
+            "--write-games",
+            action="store_true",
+            help="If set, writes perfectly played games to the DB for each successful episode. Tags: 'oracle-perfect' and 'seed:<seed>' will be added.",
         )
 
     def handle(self, *args: Any, **opts: Any) -> None:
@@ -158,7 +272,7 @@ class Command(BaseCommand):
         seeds: list[int] = []
         for i in range(n):
             try:
-                r = _oracle_rejections_for_trial(
+                r, prefix_people = _oracle_rejections_for_trial(
                     generator,
                     constraints,
                     seed=seed0 + i * 17,
@@ -181,6 +295,41 @@ class Command(BaseCommand):
                     f"  Progress: {i + 1}/{n} | successes={len(rejs)} failures={failures} "
                     f"| last_rejections={r} | mean_so_far={mean_so_far:.2f}"
                 )
+
+            if bool(opts.get("write_games", False)):
+                # Persist a LocalGame with decisions for prefix_people up to t*, accepting indices in sel
+                sel = _find_feasible_selection(prefix_people, constraints, CAPACITY)
+                if sel is None:
+                    # This should never happen since we just proved feasibility
+                    self.stdout.write(
+                        self.style.ERROR(
+                            f"Episode {i + 1}/{n} unexpected error: could not reconstruct feasible selection despite solver proving feasibility. "
+                            f"Seed: {seed0 + i * 17}. Skipping DB write."
+                        )
+                    )
+                    continue
+                game = LocalGame.objects.create(
+                    game_id=str(uuid.uuid4()),
+                    scenario=scenario,
+                    constraints=cfg["constraints"],
+                    attribute_statistics=cfg["attribute_statistics"],
+                    status="completed",
+                    completion_reason=f"Oracle perfect | rejects={int(r)}",
+                    completed_at=timezone.now(),
+                    tags=["oracle-perfect", f"seed:{seed0 + i * 17}"],
+                )
+                persons: list[Person] = []
+                for idx, attrs in enumerate(prefix_people):
+                    persons.append(
+                        Person(
+                            game=game,
+                            person_index=idx,
+                            attributes=attrs,
+                            decision=True if idx in sel else False,
+                        )
+                    )
+                # Bulk create in batches for efficiency
+                Person.objects.bulk_create(persons, batch_size=1000)
 
         # Write raw results to CSV
         csv_out = str(opts.get("csv_out") or "").strip()
