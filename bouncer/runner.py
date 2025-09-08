@@ -30,7 +30,7 @@ async def wait_for_remote_game_capacity(log: Callable[[str], None]) -> None:
             # Defensive: if query returns no row unexpectedly, do not block
             return
 
-        target_time = oldest.created_at + timedelta(minutes=15)
+        target_time = oldest.created_at + timedelta(minutes=15, seconds=30)
         wait_seconds = max(1.0, float((target_time - now).total_seconds()))
         log(
             f"Remote game creation limit reached: Sleeping {int(wait_seconds)}s until {target_time.isoformat()}\n"
