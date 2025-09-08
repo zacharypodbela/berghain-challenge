@@ -2,9 +2,6 @@ All evals run with same `--seed 12345`
 
 # Scenario 1
 
-**Best Mean (Always Win):** `ppo_bc_s1.zip`
-**Best p90 (Risk On / Go For High Score):** `ppo_bc_s1_oracle500.zip`
-
 ## ppo_bc_s1.zip
 
 Trained on 50 games played by `two_trait_heuristic_bouncer` (Dataset: `s1_expert_50.npz`).
@@ -62,9 +59,6 @@ Episodes: 1000
 | Outcomes | success=651 | unmet_at_capacity=349 | rejection_limit=0 |
 
 # Scenario 2
-
-**Current Best (Always Win):** TBD
-**Current Best (Risk On / Go For High Score):** TBD
 
 ## ppo_bc_s2_50.zip
 
@@ -130,7 +124,15 @@ Training Configuration:
 python manage.py train_ppo --scenario 2 --init-from models/ppo_bc_s2_oracle500.zip --total-timesteps 800000 --n-envs 4 --gamma 0.9997 --gae-lambda 0.997 --n-steps 8192 --ent-coef 0.05 --shape-coef 6.0 --nonhelp-penalty 0.3 --success-bonus 40000 --minmeet-bonus 4.0 --fail-penalty-scale 0.15 --success-bonus-per-saved 10.0 --late-reject-weight 1.0 --eval-freq 50000 --eval-episodes 300 --eval-percentile 99 --no-vecnorm --log-dir runs/ppo_s2_oracle_p99_push --save-path models/ppo_s2_oracle_p99_push.zip
 ```
 
-[NEED TO RE RUN]
+Episodes: 1000
+
+|          | Mean        | Std                   | P01               | P05       | P10       | P90      | P95      | P99      | Min       | Max      |
+| -------- | ----------- | --------------------- | ----------------- | --------- | --------- | -------- | -------- | -------- | --------- | -------- |
+| Reward   | -20441.45   | 7396.37               | -24082.01         | -23973.10 | -23913.00 | -3734.60 | -3588.90 | -3443.98 | -24417.00 | -3347.00 |
+| length   | 4701.4      | 172.9                 | 4313.9            | 4426.0    | 4484.0    | 4925.0   | 4989.1   | 5098.0   | 4211.0    | 5417.0   |
+| Admitted | 1000.0      | 0.0                   | 1000.0            | 1000.0    | 1000.0    | 1000.0   | 1000.0   | 1000.0   | 1000.0    | 1000.0   |
+| Rejected | 3701.4      | 172.9                 | 3313.9            | 3426.0    | 3484.0    | 3925.0   | 3989.1   | 4098.0   | 3211.0    | 4417.0   |
+| Outcomes | success=163 | unmet_at_capacity=837 | rejection_limit=0 |
 
 # Scenario 3
 
