@@ -112,7 +112,15 @@ python manage.py train_ppo --scenario 2 --init-from runs/ppo_s2_bc200_riskon_p95
 
 Trained on 500 games played perfectly by an oracle that knows all people will come during episode (using `oracle_baseline.py`). (Dataset: `s2_oracle_500.npz`).
 
-[NEED TO RE RUN]
+Episodes: 1000
+
+|          | Mean        | Std                   | P01               | P05       | P10       | P90      | P95      | P99      | Min       | Max      |
+| -------- | ----------- | --------------------- | ----------------- | --------- | --------- | -------- | -------- | -------- | --------- | -------- |
+| Reward   | -16793.01   | 9597.13               | -24365.15         | -24223.05 | -24160.00 | -3870.50 | -3786.90 | -3611.88 | -24569.00 | -3514.00 |
+| length   | 4973.0      | 179.7                 | 4547.0            | 4682.9    | 4748.9    | 5211.1   | 5272.1   | 5394.1   | 4481.0    | 5569.0   |
+| Admitted | 1000.0      | 0.0                   | 1000.0            | 1000.0    | 1000.0    | 1000.0   | 1000.0   | 1000.0   | 1000.0    | 1000.0   |
+| Rejected | 3973.0      | 179.7                 | 3547.0            | 3682.8    | 3748.9    | 4211.1   | 4272.1   | 4394.1   | 3481.0    | 4569.0   |
+| Outcomes | success=359 | unmet_at_capacity=641 | rejection_limit=0 |
 
 ## ppo_s2_oracle_p99_push
 
