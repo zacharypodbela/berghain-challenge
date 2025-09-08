@@ -159,4 +159,4 @@ async def run_game_until(
             )
             return
 
-    log(f"\nAlgorithm run completed. Decisions made: {decisions_made}")
+    log("Algorithm run completed.")
