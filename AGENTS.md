@@ -103,6 +103,26 @@ Train a PPO policy on the simulated environment.
 python manage.py train_ppo --scenario 1 --total-timesteps 200000 --n-envs 8 --log-dir runs/ppo_sim --save-path models/ppo_sim.zip [--init-from models/bc_init.zip]
 ```
 
+### Hypervisor (`hypervisor`)
+
+Manage multiple RemoteGames concurrently per scenario, with early stop when a run cannot beat the current best score.
+
+```bash
+python manage.py hypervisor --scenarios 1,1,2,2,3 --algorithm-map "1=ppo_bouncer@models/s1.zip,2=deficit_weighted_bouncer,3=ppo_bouncer@models/s3.zip" [--verbose]
+```
+
+**Params:**
+
+- `--scenarios <str>`: Comma-separated scenario list; repeat to control concurrency per scenario (e.g., `1,1,2,2,3` runs two slots each for 1 and 2, one for 3).
+- `--algorithm-map <str>`: Per‑scenario mapping `"S=algorithm[@model-path]"` (comma‑separated). Example: `1=ppo_bouncer@models/s1.zip,2=deficit_weighted_bouncer,3=ppo_bouncer@models/s3.zip`.
+- `--verbose`: Per-decision logging (quiet by default).
+
+**Notes:**
+
+- Each run stops early if its current `rejected_count` exceeds the best completed score for that scenario.
+- Slots start new game automatically when a run completes or is stopped early.
+- Respects server-side `RemoteGame` creation rate limits.
+
 **Required Params:**
 
 - `--scenario <int>`: Scenario to train on (choices: 1, 2, 3).
