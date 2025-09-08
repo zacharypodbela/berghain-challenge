@@ -11,7 +11,6 @@ from django.utils import timezone
 
 from bouncer.algorithms import ALGORITHMS, AlgorithmFunc, get_algorithm
 from bouncer.models import Game, LocalGame, RemoteGame
-from bouncer.runner import run_game_until
 
 
 class Command(BaseCommand):
@@ -93,6 +92,21 @@ class Command(BaseCommand):
             if not algorithm_name:
                 raise CommandError("No algorithm provided")
 
+        # Get game ID from user if not provided and scenario not given
+        if not game_id and not scenario:
+            self.stdout.write("\nAvailable games:")
+            games = Game.objects.filter(status="running").all().order_by("-created_at")
+            for game in games[:10]:  # Show latest 10 games
+                self.stdout.write(
+                    f"{game.game_id} (Scenario {game.scenario}, "
+                    f"Status: {game.status}, "
+                    f"People: {game.people.count()})"
+                )
+
+            game_id = input("\nEnter game ID to run algorithm on: ").strip()
+            if not game_id:
+                raise CommandError("No game ID provided")
+
         # Get algorithm
         try:
             algorithm = get_algorithm(algorithm_name)
@@ -104,123 +118,66 @@ class Command(BaseCommand):
             if n_games > 1:
                 self.stdout.write(self.style.MIGRATE_HEADING(f"\nRun {idx}/{n_games}"))
 
-            if scenario:
-                # Start one or more new LocalGame/RemoteGame episodes for the given scenario
-                if use_server:
-                    # Respect remote creation limit: max 10 per rolling 15 minutes
-                    self._wait_for_remote_game_capacity()
-                    game = RemoteGame.start_new_game(int(scenario))
-                else:
-                    game = LocalGame.start_new_game(int(scenario))
-                game.tags.append(f"algorithm:{algorithm_name}")
-                if model_path:
-                    game.tags.append(f"model:{model_path}")
-                game.save()
-                self.stdout.write(
-                    self.style.SUCCESS(
-                        f"Created {'RemoteGame' if use_server else 'LocalGame'} {game.game_id} for scenario {game.scenario}"
-                    )
-                )
-            else:
-                # Get game ID from user if not provided
-                if not game_id:
-                    self.stdout.write("\nAvailable games:")
-                    games = (
-                        Game.objects.filter(status="running")
-                        .all()
-                        .order_by("-created_at")
-                    )
-                    for game in games[:10]:  # Show latest 10 games
-                        status_color = self.get_status_color(game.status)
-                        if status_color:
-                            status_text = status_color(game.status)
-                        else:
-                            status_text = game.status
-                        self.stdout.write(
-                            f"  {game.game_id} (Scenario {game.scenario}, "
-                            f"Status: {status_text}, "
-                            f"People: {game.people.count()})"
-                        )
-
-                    game_id = input("\nEnter game ID to run algorithm on: ").strip()
-                    if not game_id:
-                        raise CommandError("No game ID provided")
-
-                # Get and validate single game
-                try:
-                    game = Game.objects.get(game_id=game_id)
-                    if game.status != "running":
-                        raise CommandError(
-                            f'Game "{game_id}" has status "{game.status}" - can only run on "running" games'
-                        )
-                except Game.DoesNotExist as e:
-                    raise CommandError(f'Game "{game_id}" does not exist') from e
-
-            self.stdout.write(
-                f"\n{self.style.SUCCESS('Starting algorithm run:')}\n"
-                f"Game: {game.game_id} (Scenario {game.scenario})\n"
-                f"Algorithm: {algorithm_name}\n"
-                f"Current status: {game.status}\n"
-                f"Current counts - Admitted: {game.admitted_count}, "
-                f"Rejected: {game.rejected_count}, Pending: {game.pending_count}\n"
-            )
-
-            # Check if we can run on this game
-            if game.status == "completed":
-                raise CommandError("Game is already completed")
-            elif game.status == "failed":
-                raise CommandError("Game has failed - cannot restart")
-            elif game.status == "error":
-                raise CommandError("Game has an error status - cannot restart")
-
-            # Handle restart logic
-            self.handle_game_restart(game)
-
             # Run the algorithm
-            self.run_algorithm(game, algorithm, delay, model_path, verbose)
-
-    def get_status_color(self, status: str) -> Any | None:
-        """Get color styling for game status"""
-        colors = {
-            "running": self.style.WARNING,
-            "completed": self.style.SUCCESS,
-            "failed": self.style.ERROR,
-            "error": self.style.ERROR,
-        }
-        return colors.get(status, "")
-
-    def handle_game_restart(self, game: Game) -> None:
-        """Handle restarting a game from where we left off"""
-        pending_people = game.people.filter(decision__isnull=True).order_by(
-            "person_index"
-        )
-
-        if not pending_people.exists():
-            # No pending people - something is wrong if game isn't completed
-            if game.status == "running":
-                self.stdout.write(
-                    f"{self.style.ERROR('ERROR:')} Game is running but has no pending people. "
-                    f"Setting status to 'error'."
-                )
-                game.status = "error"
-                game.save()
-                raise CommandError("Game state is inconsistent - marked as error")
-        else:
-            first_pending = pending_people.first()
-            self.stdout.write(
-                f"Resuming from Person #{first_pending.person_index} "
-                f"(found {pending_people.count()} pending people)"
+            self.run_algorithm(
+                algorithm, game_id, scenario, use_server, model_path, verbose
             )
 
     def run_algorithm(
         self,
-        game: Game,
         algorithm: AlgorithmFunc,
-        delay: float,
-        model_path: str | None,
-        verbose: bool,
+        game_id: str | None = None,
+        scenario: int | None = None,
+        use_server: bool = False,
+        model_path: str | None = None,
+        verbose: bool = False,
     ) -> None:
         """Run the algorithm on the game until completion or error"""
+        if scenario:
+            # Start one or more new LocalGame/RemoteGame episodes for the given scenario
+            if use_server:
+                # Respect remote creation limit: max 10 per rolling 15 minutes
+                self._wait_for_remote_game_capacity()
+                game = RemoteGame.start_new_game(int(scenario))
+            else:
+                game = LocalGame.start_new_game(int(scenario))
+            game.tags.append(f"algorithm:{algorithm.__name__}")
+            if model_path:
+                game.tags.append(f"model:{model_path}")
+            game.save()
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"Created {'RemoteGame' if use_server else 'LocalGame'} {game.game_id} for scenario {game.scenario}"
+                )
+            )
+        else:
+            # Get and validate single game
+            try:
+                game = Game.objects.get(game_id=game_id)
+                if game.status != "running":
+                    raise CommandError(
+                        f'Game "{game_id}" has status "{game.status}" - can only run on "running" games'
+                    )
+            except Game.DoesNotExist as e:
+                raise CommandError(f'Game "{game_id}" does not exist') from e
+
+        self.stdout.write(
+            f"\n{self.style.SUCCESS('Starting algorithm run:')}\n"
+            f"Game: {game.game_id} (Scenario {game.scenario})\n"
+            f"Algorithm: {algorithm.__name__}\n"
+            f"Current status: {game.status}\n"
+            f"Current counts - Admitted: {game.admitted_count}, "
+            f"Rejected: {game.rejected_count}, Pending: {game.pending_count}\n"
+        )
+
+        # Check if we can run on this game
+        if game.status == "completed":
+            raise CommandError("Game is already completed")
+        elif game.status == "failed":
+            raise CommandError("Game has failed - cannot restart")
+        elif game.status == "error":
+            raise CommandError("Game has an error status - cannot restart")
+
         decisions_made = 0
 
         while game.status == "running":
@@ -269,10 +226,6 @@ class Command(BaseCommand):
                     if game.completion_reason:
                         self.stdout.write(f"Reason: {game.completion_reason}")
                     break
-
-                # Add delay between decisions
-                if delay > 0:
-                    time.sleep(delay)
 
             except Exception as e:
                 self.stdout.write(
