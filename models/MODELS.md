@@ -110,6 +110,8 @@ python manage.py train_ppo --scenario 2 --init-from runs/ppo_s2_bc200_riskon_p95
 
 ## ppo_bc_s2_oracle500
 
+Trained on 500 games played perfectly by an oracle that knows all people will come during episode (using `oracle_baseline.py`). (Dataset: `s2_oracle_500.npz`).
+
 [NEED TO RE RUN]
 
 ## ppo_s2_oracle_p99_push
@@ -121,3 +123,19 @@ python manage.py train_ppo --scenario 2 --init-from models/ppo_bc_s2_oracle500.z
 ```
 
 [NEED TO RE RUN]
+
+# Scenario 3
+
+## ppo_bc_s3_oracle500
+
+Trained on 415\* games played perfectly by an oracle that knows all people will come during episode (using `oracle_baseline.py`). (Dataset: `s3_oracle_500.npz`). (\* We tried to generate 500, but 85 games were too complex for the solver to figure out optimal strategy before timing out.)
+
+Episodes: 1000
+
+|          | Mean        | Std                   | P01               | P05       | P10       | P90      | P95      | P99      | Min       | Max      |
+| -------- | ----------- | --------------------- | ----------------- | --------- | --------- | -------- | -------- | -------- | --------- | -------- |
+| Reward   | -10817.39   | 9128.59               | -25283.08         | -25059.15 | -24930.10 | -4666.80 | -4575.95 | -4420.94 | -25491.00 | -4273.00 |
+| length   | 5877.4      | 211.5                 | 5396.0            | 5535.0    | 5609.0    | 6153.0   | 6242.1   | 6407.0   | 5273.0    | 6653.0   |
+| Admitted | 1000.0      | 0.0                   | 1000.0            | 1000.0    | 1000.0    | 1000.0   | 1000.0   | 1000.0   | 1000.0    | 1000.0   |
+| Rejected | 4877.4      | 211.5                 | 4396.0            | 4535.0    | 4609.0    | 5153.0   | 5242.1   | 5407.0   | 4273.0    | 5653.0   |
+| Outcomes | success=703 | unmet_at_capacity=297 | rejection_limit=0 |
