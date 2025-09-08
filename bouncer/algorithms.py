@@ -7,7 +7,6 @@ on people trying to get into the nightclub.
 
 import math
 from collections.abc import Awaitable, Callable
-from typing import TextIO
 
 from asgiref.sync import sync_to_async
 from django.core.management.base import CommandError
@@ -17,11 +16,13 @@ from bouncer.constants import CAPACITY
 from bouncer.models import Game, Person
 from bouncer.rl.env import ATTRIBUTE_ORDER, build_observation_vector
 
-AlgorithmFunc = Callable[[Person, Game, TextIO, str | None], Awaitable[bool]]
+AlgorithmFunc = Callable[
+    [Person, Game, Callable[[str], None], str | None], Awaitable[bool]
+]
 
 
 async def too_nice_bouncer(
-    person: Person, game: Game, stdout: TextIO, model_path: str | None
+    person: Person, game: Game, log: Callable[[str], None], model_path: str | None
 ) -> bool:
     """
     Simple algorithm that always accepts everyone.
@@ -37,7 +38,7 @@ async def too_nice_bouncer(
 
 
 async def so_mean_bouncer(
-    person: Person, game: Game, stdout: TextIO, model_path: str | None
+    person: Person, game: Game, log: Callable[[str], None], model_path: str | None
 ) -> bool:
     """
     Simple algorithm that always rejects everyone.
@@ -53,7 +54,7 @@ async def so_mean_bouncer(
 
 
 def optimal_markov_bouncer(
-    person: Person, game: Game, stdout: TextIO, model_path: str | None
+    person: Person, game: Game, log: Callable[[str], None], model_path: str | None
 ) -> bool:
     """
     Markov Decision Process approach to minimize rejections while meeting constraints.
@@ -220,7 +221,7 @@ def _compute_counters(
 
 
 def two_trait_heuristic_bouncer(
-    person: Person, game: Game, stdout: TextIO, model_path: str | None
+    person: Person, game: Game, log: Callable[[str], None], model_path: str | None
 ) -> bool:
     """
     Online decision rule with 'both-credit' and 'debt' guards.
@@ -296,7 +297,7 @@ def two_trait_heuristic_bouncer(
 
 
 def deficit_weighted_bouncer(
-    person: Person, game: Game, stdout: TextIO, model_path: str | None
+    person: Person, game: Game, log: Callable[[str], None], model_path: str | None
 ) -> bool:
     """Dynamic-overlap heuristic tuned for multi-constraint scenarios.
 
@@ -348,7 +349,7 @@ def deficit_weighted_bouncer(
 
 
 def deficit_weighted_bouncer_s3(
-    person: Person, game: Game, stdout: TextIO, model_path: str | None
+    person: Person, game: Game, log: Callable[[str], None], model_path: str | None
 ) -> bool:
     """A variant of deficit_weighted_bouncer with special rules to win scenario 3."""
     constraints = {c["attribute"]: int(c["minCount"]) for c in game.constraints}
@@ -437,7 +438,7 @@ def deficit_weighted_bouncer_s3(
 
 
 async def ppo_bouncer(
-    person: Person, game: Game, stdout: TextIO, model_path: str | None
+    person: Person, game: Game, log: Callable[[str], None], model_path: str | None
 ) -> bool:
     """Use a saved Stable-Baselines3 PPO policy to decide."""
     if model_path is None:

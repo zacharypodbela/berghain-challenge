@@ -114,7 +114,7 @@ class Command(BaseCommand):
             asyncio.run(
                 run_game_until(
                     algorithm,
-                    self.stdout,
+                    lambda msg: self.stdout.write(msg),
                     game_id=game_id,
                     scenario=scenario,
                     use_server=use_server,

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+import signal
+import uuid
+from collections.abc import Callable
+from types import FrameType, TracebackType
+from typing import Any, Literal, Self, cast
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db.models import Count, Q
@@ -10,6 +14,36 @@ from bouncer.algorithms import ALGORITHMS, AlgorithmFunc, get_algorithm
 from bouncer.constants import REJECTION_LIMIT
 from bouncer.models import RemoteGame
 from bouncer.runner import run_game_until
+
+
+class DelayedKeyboardInterrupt:
+    signal_received: tuple[int, FrameType | None] | Literal[False]
+
+    def __init__(self, on_interrupt: Callable[[], None] | None = None):
+        self.on_interrupt = on_interrupt
+
+    def __enter__(self) -> Self:
+        self.signal_received = False
+        self.old_handler = cast(
+            Callable[[int, FrameType | None], None],
+            signal.signal(signal.SIGINT, self.handler),
+        )
+        return self
+
+    def handler(self, sig: int, frame: FrameType | None) -> None:
+        self.signal_received = (sig, frame)
+        if self.on_interrupt:
+            self.on_interrupt()
+
+    def __exit__(
+        self,
+        type: type,
+        value: Exception | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        signal.signal(signal.SIGINT, self.old_handler)
+        if self.signal_received:
+            self.old_handler(*self.signal_received)
 
 
 class Command(BaseCommand):
@@ -105,14 +139,23 @@ class Command(BaseCommand):
                 f"Scenario {s}: current best rejects = {best_by_s[s] if best_by_s[s] is not None else 'N/A'}"
             )
 
+        should_stop = False
+
         async def run_one_slot(s: int) -> None:
             def stop_condition(rejected_count: int) -> bool:
                 best = best_by_s.get(s)
                 return best is not None and rejected_count > best
 
+            id = uuid.uuid4()
+
+            def log(msg: str) -> None:
+                prefix = f"[{id}] "
+                for line in msg.splitlines(keepends=True):
+                    self.stdout.write(prefix + line)
+
             await run_game_until(
                 algorithm=resolved[s][0],
-                stdout=self.stdout,
+                log=log,
                 scenario=s,
                 use_server=True,
                 model_path=resolved[s][1],
@@ -122,11 +165,11 @@ class Command(BaseCommand):
 
             # Recompute best after this slot finishes a run
             row = (
-                RemoteGame.objects.filter(status="completed", scenario=s)
+                await RemoteGame.objects.filter(status="completed", scenario=s)
                 .values("scenario")
                 .annotate(best=Count("people", filter=Q(people__decision=False)))
                 .order_by("best")
-                .first()
+                .afirst()
             )
             if row is not None:
                 new_best = int(row.get("best", REJECTION_LIMIT))
@@ -156,7 +199,10 @@ class Command(BaseCommand):
                     active, return_when=asyncio.FIRST_COMPLETED
                 )
                 for _t in done:
-                    launch()
+                    if not should_stop:
+                        launch()
+                if should_stop and not active:
+                    break
 
         async def main() -> None:
             # Build counts by scenario value
@@ -167,7 +213,17 @@ class Command(BaseCommand):
                 *(manage_scenario(s, slots) for s, slots in counts.items())
             )
 
+        def on_interrupt() -> None:
+            nonlocal should_stop
+            should_stop = True
+            self.stdout.write(
+                self.style.WARNING(
+                    "Gracefully stopping... (wait for current runs to finish)"
+                )
+            )
+
         try:
-            asyncio.run(main())
+            with DelayedKeyboardInterrupt(on_interrupt=on_interrupt):
+                asyncio.run(main())
         except KeyboardInterrupt:
-            self.stdout.write("\nHypervisor stopped (KeyboardInterrupt).")
+            self.stdout.write("Hypervisor shutdown.")

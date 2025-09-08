@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from datetime import timedelta
-from typing import TextIO
 
 from django.utils import timezone
 
@@ -11,7 +10,7 @@ from bouncer.algorithms import AlgorithmFunc
 from bouncer.models import Game, LocalGame, RemoteGame
 
 
-async def wait_for_remote_game_capacity(stdout: TextIO | None = None) -> None:
+async def wait_for_remote_game_capacity(log: Callable[[str], None]) -> None:
     """Respect remote creation limit: max 10 RemoteGames per rolling 15 minutes.
 
     Blocks until capacity is available. Mirrors logic from run_algorithm.
@@ -33,16 +32,15 @@ async def wait_for_remote_game_capacity(stdout: TextIO | None = None) -> None:
 
         target_time = oldest.created_at + timedelta(minutes=15)
         wait_seconds = max(1.0, float((target_time - now).total_seconds()))
-        if stdout is not None:
-            stdout.write(
-                f"Remote game creation limit reached: Sleeping {int(wait_seconds)}s until {target_time.isoformat()}\n"
-            )
+        log(
+            f"Remote game creation limit reached: Sleeping {int(wait_seconds)}s until {target_time.isoformat()}\n"
+        )
         await asyncio.sleep(wait_seconds)
 
 
 async def run_game_until(
     algorithm: AlgorithmFunc,
-    stdout: TextIO,
+    log: Callable[[str], None],
     game_id: str | None = None,
     scenario: int | None = None,
     use_server: bool = False,
@@ -58,7 +56,7 @@ async def run_game_until(
         # Start one or more new LocalGame/RemoteGame episodes for the given scenario
         if use_server:
             # Respect remote creation limit: max 10 per rolling 15 minutes
-            await wait_for_remote_game_capacity(stdout)
+            await wait_for_remote_game_capacity(log)
             game = await RemoteGame.astart_new_game(int(scenario))
         else:
             game = await LocalGame.astart_new_game(int(scenario))
@@ -66,7 +64,7 @@ async def run_game_until(
         if model_path:
             game.tags.append(f"model:{model_path}")
         await game.asave()
-        stdout.write(
+        log(
             f"Created {'RemoteGame' if use_server else 'LocalGame'} {game.game_id} for scenario {game.scenario}"
         )
     else:
@@ -82,7 +80,7 @@ async def run_game_until(
 
     stats = await game.attribute_and_top_of_house_counts
 
-    stdout.write(
+    log(
         f"Starting algorithm run:\n"
         f"Game: {game.game_id} (Scenario {game.scenario})\n"
         f"Algorithm: {algorithm.__name__}\n"
@@ -103,7 +101,7 @@ async def run_game_until(
 
     while game.status == "running":
         if stop_condition is not None and stop_condition(stats["rejected"]):
-            stdout.write(
+            log(
                 f"Stopping early due to stop condition.\n"
                 f"Current rejections: {stats['rejected']}\n"
                 f"Decisions made this run: {decisions_made}"
@@ -118,11 +116,11 @@ async def run_game_until(
         )
 
         # Make decision using algorithm
-        decision = await algorithm(pending_person, game, stdout, model_path)
+        decision = await algorithm(pending_person, game, log, model_path)
         decision_text = "ACCEPT" if decision else "REJECT"
 
         if verbose:
-            stdout.write(
+            log(
                 f"Person #{pending_person.person_index}: {decision_text} "
                 f"(Attributes: {pending_person.attributes})"
             )
@@ -139,7 +137,7 @@ async def run_game_until(
 
             # Show updated counts
             if verbose:
-                stdout.write(
+                log(
                     f"  → Counts: Admitted={stats['admitted']}, "
                     f"Rejected={stats['rejected']}, Pending={stats['pending']}"
                 )
@@ -147,7 +145,7 @@ async def run_game_until(
             # Check if game ended
             if game.status in ["completed", "failed"]:
                 status = game.status
-                stdout.write(
+                log(
                     f"Game {status.upper()}!\n"
                     f"Final score (rejections): {stats['rejected']}\n"
                     f"Total decisions made this run: {decisions_made}"
@@ -155,10 +153,10 @@ async def run_game_until(
                 break
 
         except Exception as e:
-            stdout.write(
+            log(
                 f"ERROR making decision: {str(e)}\n"
                 f"Stopping algorithm run. You can restart with the same command."
             )
             return
 
-    stdout.write(f"\nAlgorithm run completed. Decisions made: {decisions_made}")
+    log(f"\nAlgorithm run completed. Decisions made: {decisions_made}")
