@@ -164,9 +164,11 @@ class Command(BaseCommand):
             )
 
             # Recompute best after this slot finishes a run
+            # Group by game id so we get per-game reject counts and can pick the minimum,
+            # instead of aggregating across the whole scenario.
             row = (
                 await RemoteGame.objects.filter(status="completed", scenario=s)
-                .values("scenario")
+                .values("scenario", "id")
                 .annotate(best=Count("people", filter=Q(people__decision=False)))
                 .order_by("best")
                 .afirst()
@@ -178,7 +180,7 @@ class Command(BaseCommand):
                     best_by_s[s] = new_best
                     self.stdout.write(
                         self.style.SUCCESS(
-                            f"Updated best for scenario {s}: {new_best} rejects (prev={prev})"
+                            f"New best for scenario {s}: {new_best} rejects (prev={prev})"
                         )
                     )
 
