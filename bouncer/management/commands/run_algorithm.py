@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from bouncer.algorithms import ALGORITHMS, AlgorithmFunc, get_algorithm
 from bouncer.models import Game, LocalGame, RemoteGame
+from bouncer.runner import run_game_until
 
 
 class Command(BaseCommand):
@@ -59,9 +60,9 @@ class Command(BaseCommand):
             help="Optional path to a model file for model-based algorithms (e.g., PPO).",
         )
         parser.add_argument(
-            "--quiet",
+            "--verbose",
             action="store_true",
-            help=("Suppress output on decisions. Only show core notices and errors."),
+            help=("Enable per-decision logging (default is quiet)."),
         )
 
     def handle(self, *args: Any, **options: Any) -> None:
@@ -72,7 +73,7 @@ class Command(BaseCommand):
         algorithm_name = options["algorithm"]
         delay = options["delay"]
         model_path = options.get("model_path")
-        quiet = bool(options.get("quiet"))
+        verbose = bool(options.get("verbose"))
 
         # Validate scenario/game-id combinations
         if game_id and scenario:
@@ -176,7 +177,7 @@ class Command(BaseCommand):
             self.handle_game_restart(game)
 
             # Run the algorithm
-            self.run_algorithm(game, algorithm, delay, model_path, quiet)
+            self.run_algorithm(game, algorithm, delay, model_path, verbose)
 
     def get_status_color(self, status: str) -> Any | None:
         """Get color styling for game status"""
@@ -217,7 +218,7 @@ class Command(BaseCommand):
         algorithm: AlgorithmFunc,
         delay: float,
         model_path: str | None,
-        quiet: bool,
+        verbose: bool,
     ) -> None:
         """Run the algorithm on the game until completion or error"""
         decisions_made = 0
@@ -234,7 +235,7 @@ class Command(BaseCommand):
             decision = algorithm(pending_person, game, self.stdout, model_path)
             decision_text = "ACCEPT" if decision else "REJECT"
 
-            if not quiet:
+            if verbose:
                 self.stdout.write(
                     f"Person #{pending_person.person_index}: {decision_text} "
                     f"(Attributes: {pending_person.attributes})"
@@ -249,7 +250,7 @@ class Command(BaseCommand):
                 game.refresh_from_db()
 
                 # Show updated counts
-                if not quiet:
+                if verbose:
                     self.stdout.write(
                         f"  → Counts: Admitted={game.admitted_count}, "
                         f"Rejected={game.rejected_count}, Pending={game.pending_count}"
