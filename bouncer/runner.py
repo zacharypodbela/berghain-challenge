@@ -48,7 +48,7 @@ async def run_game_until(
     use_server: bool = False,
     model_path: str | None = None,
     verbose: bool = False,
-    stop_condition: Callable[[Game], bool] | None = None,
+    stop_condition: Callable[[int], bool] | None = None,
 ) -> None:
     """Run algorithm on a game until completion, error, or stop_condition.
 
@@ -102,7 +102,7 @@ async def run_game_until(
     decisions_made = 0
 
     while game.status == "running":
-        if stop_condition is not None and stop_condition(game):
+        if stop_condition is not None and stop_condition(stats["rejected"]):
             stdout.write(
                 f"Stopping early due to stop condition.\n"
                 f"Current rejections: {stats['rejected']}\n"

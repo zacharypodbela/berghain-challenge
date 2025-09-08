@@ -451,6 +451,13 @@ async def ppo_bouncer(
     constraints = {c["attribute"]: int(c["minCount"]) for c in game.constraints}
     min_counts = {a: int(constraints.get(a, 0)) for a in ATTRIBUTE_ORDER}
 
+    # If we've already met all minima, accept everyone remaining
+    if all(
+        attribute_and_top_of_house_counts.get(attr, 0) >= min_counts.get(attr, 0)
+        for attr in ATTRIBUTE_ORDER
+    ):
+        return True
+
     obs = build_observation_vector(
         scenario=int(game.scenario),
         admitted=admitted,
