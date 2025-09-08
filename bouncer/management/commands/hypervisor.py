@@ -112,7 +112,9 @@ class Command(BaseCommand):
                         f"Algorithm '{algo_name}' requires a model path in --algorithm-map (use 'algo@path')."
                     )
                 self.stdout.write(
-                    f"Scenario {s_val}: algo={algo_name} model={model_spec if model_spec else '-'}"
+                    self.style.WARNING(
+                        f"Scenario {s_val}: algo={algo_name} model={model_spec if model_spec else '-'}"
+                    )
                 )
                 resolved[s_val] = (get_algorithm(algo_name), model_spec)
         else:
@@ -136,7 +138,9 @@ class Command(BaseCommand):
                 best_by_s[scen] = rej
         for s in unique_scenarios:
             self.stdout.write(
-                f"Scenario {s}: current best rejects = {best_by_s[s] if best_by_s[s] is not None else 'N/A'}"
+                self.style.MIGRATE_HEADING(
+                    f"Scenario {s}: current best rejects = {best_by_s[s] if best_by_s[s] is not None else 'N/A'}"
+                )
             )
 
         should_stop = False
@@ -228,4 +232,4 @@ class Command(BaseCommand):
             with DelayedKeyboardInterrupt(on_interrupt=on_interrupt):
                 asyncio.run(main())
         except KeyboardInterrupt:
-            self.stdout.write("Hypervisor shutdown.")
+            self.stdout.write(self.style.WARNING("Hypervisor shutdown."))
