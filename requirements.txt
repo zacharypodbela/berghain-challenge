@@ -14,4 +14,5 @@ django-polymorphic==4.1.0
 gymnasium==0.29.1
 torch==2.3.1
 stable-baselines3==2.4.1
-ortools
+ortools==9.14.6206
+httpx==0.28.1

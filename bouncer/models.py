@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+import asyncio
+from typing import Any, ClassVar, cast
 
 from django.db import models
+from django.db.models import Count, Q
 from django.utils import timezone
+from django.utils.functional import cached_property
 from polymorphic.models import PolymorphicModel
 
 from bouncer.constants import CAPACITY, REJECTION_LIMIT
 from bouncer.generate_attributes import CorrelatedAttributeGenerator
 
 from . import remote_api
-
-if TYPE_CHECKING:
-    from typing import Self
 
 
 class Game(PolymorphicModel):
@@ -48,16 +48,46 @@ class Game(PolymorphicModel):
     def pending_count(self) -> int:
         return cast(int, self.people.filter(decision__isnull=True).count())
 
+    @property
+    async def attribute_and_top_of_house_counts(self) -> dict[str, int]:
+        from bouncer.rl.env import ATTRIBUTE_ORDER
+
+        return cast(
+            dict[str, int],
+            await self.people.aaggregate(
+                admitted=Count("id", filter=Q(decision=True)),
+                rejected=Count("id", filter=Q(decision=False)),
+                pending=Count("id", filter=Q(decision__isnull=True)),
+                **{
+                    # count of admitted people who have this attribute
+                    attr: Count(
+                        "id",
+                        filter=Q(decision=True) & Q(**{f"attributes__{attr}": True}),
+                    )
+                    for attr in ATTRIBUTE_ORDER
+                },
+            ),
+        )
+
     @classmethod
-    def start_new_game(cls, scenario: int, **kwargs: Any) -> Self:
-        raise NotImplementedError("Subclasses must implement start_new_game()")
+    async def astart_new_game(cls, scenario: int, **kwargs: Any) -> Game:
+        raise NotImplementedError("Subclasses must implement astart_new_game()")
+
+    @classmethod
+    def start_new_game(cls, scenario: int, **kwargs: Any) -> Game:
+        return asyncio.run(cls.astart_new_game(scenario, **kwargs))
+
+    async def amake_decision_and_get_next(
+        self, person: Person, accept: bool
+    ) -> dict[str, Any]:
+        raise NotImplementedError(
+            "Subclasses must implement amake_decision_and_get_next()"
+        )
 
     def make_decision_and_get_next(
         self, person: Person, accept: bool
     ) -> dict[str, Any]:
-        raise NotImplementedError(
-            "Subclasses must implement make_decision_and_get_next()"
-        )
+        return asyncio.run(self.amake_decision_and_get_next(person, accept))
 
     def __str__(self) -> str:
         return f"Game {self.game_id} - Scenario {self.scenario} - Status: {self.status}"
@@ -70,7 +100,7 @@ class RemoteGame(Game):
     """Game that uses the remote API"""
 
     @classmethod
-    def start_new_game(cls, scenario: int, **kwargs: Any) -> RemoteGame:
+    async def astart_new_game(cls, scenario: int, **kwargs: Any) -> RemoteGame:
         """
         Start a new game by calling the API and storing the game and first person in the database.
 
@@ -87,10 +117,10 @@ class RemoteGame(Game):
 
         try:
             # Step 1: Call new-game API
-            game_data = remote_api.create_new_game(scenario)
+            game_data = await remote_api.create_new_game(scenario)
 
             # Step 2: Create game in database if API call successful
-            game = cls.objects.create(
+            game = await cls.objects.acreate(
                 game_id=game_data["gameId"],
                 scenario=scenario,
                 constraints=game_data["constraints"],
@@ -99,7 +129,7 @@ class RemoteGame(Game):
             )
 
             # Step 3: Get first person
-            first_person_data = remote_api.make_decision_and_get_next(
+            first_person_data = await remote_api.make_decision_and_get_next(
                 game_id=game.game_id,
                 person_index=0,
             )
@@ -108,7 +138,7 @@ class RemoteGame(Game):
             # The API returns the next person to make a decision on (person #1)
             if "nextPerson" in first_person_data and first_person_data["nextPerson"]:
                 person_data = first_person_data["nextPerson"]
-                Person.objects.create(
+                await Person.objects.acreate(
                     game=game,
                     person_index=person_data["personIndex"],
                     attributes=person_data["attributes"],
@@ -123,40 +153,44 @@ class RemoteGame(Game):
                 game.delete()
             raise
 
-    def make_decision_and_get_next(
+    async def amake_decision_and_get_next(
         self, person: Person, accept: bool
     ) -> dict[str, Any]:
         # Call the API
-        api_data = remote_api.make_decision_and_get_next(
+        api_data = await remote_api.make_decision_and_get_next(
             game_id=self.game_id, person_index=person.person_index, accept=accept
         )
 
         # Only update database if API call was successful
         person.decision = accept
-        person.save(update_fields=["decision"])
+        await person.asave(update_fields=["decision"])
 
         # Update game status if the game is completed or failed
         if api_data.get("status") == "completed":
             self.status = "completed"
             self.completed_at = timezone.now()
             self.completion_reason = "Game completed successfully"
-            self.save(update_fields=["status", "completed_at", "completion_reason"])
+            await self.asave(
+                update_fields=["status", "completed_at", "completion_reason"]
+            )
         elif api_data.get("status") == "failed":
             self.status = "failed"
             self.completion_reason = api_data.get(
                 "reason", "Game failed - no reason provided"
             )
             self.completed_at = timezone.now()
-            self.save(update_fields=["status", "completed_at", "completion_reason"])
+            await self.asave(
+                update_fields=["status", "completed_at", "completion_reason"]
+            )
 
         # Store the next person if provided in the response
         if "nextPerson" in api_data and api_data["nextPerson"]:
             next_person_data = api_data["nextPerson"]
             # Only create if this person doesn't already exist
-            if not Person.objects.filter(
+            if not await Person.objects.filter(
                 game=self, person_index=next_person_data["personIndex"]
-            ).exists():
-                Person.objects.create(
+            ).aexists():
+                await Person.objects.acreate(
                     game=self,
                     person_index=next_person_data["personIndex"],
                     attributes=next_person_data["attributes"],
@@ -169,17 +203,12 @@ class RemoteGame(Game):
 class LocalGame(Game):
     """Game that runs locally without API calls"""
 
-    attribute_generator: CorrelatedAttributeGenerator
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        # TODO: This is being computed every time the model is loaded from DB. Optimize by caching (or storing in DB).
-        self.attribute_generator = CorrelatedAttributeGenerator(
-            self.attribute_statistics
-        )
+    @cached_property
+    def attribute_generator(self) -> CorrelatedAttributeGenerator:
+        return CorrelatedAttributeGenerator(self.attribute_statistics)
 
     @classmethod
-    def start_new_game(cls, scenario: int, **kwargs: Any) -> LocalGame:
+    async def astart_new_game(cls, scenario: int, **kwargs: Any) -> LocalGame:
         """
         Create a local game that generates people on-demand, like RemoteGame.
 
@@ -199,7 +228,7 @@ class LocalGame(Game):
         config = SCENARIO_CONFIGS[scenario]
 
         # Create game
-        game = cls.objects.create(
+        game = await cls.objects.acreate(
             game_id=uuid.uuid4(),
             scenario=scenario,
             constraints=config["constraints"],
@@ -208,11 +237,11 @@ class LocalGame(Game):
         )
 
         # Create just the first person (like RemoteGame does)
-        game._create_next_person(0)
+        await game._acreate_next_person(0)
 
         return cast(LocalGame, game)
 
-    def _create_next_person(self, person_index: int) -> Person:
+    async def _acreate_next_person(self, person_index: int) -> Person:
         """Generate and create a single person on-demand"""
         # Generate one person's attributes
         people_attributes = self.attribute_generator.sample(1)
@@ -220,7 +249,7 @@ class LocalGame(Game):
         # Create the person
         return cast(
             Person,
-            Person.objects.create(
+            await Person.objects.acreate(
                 game=self,
                 person_index=person_index,
                 attributes=people_attributes[0],
@@ -228,7 +257,7 @@ class LocalGame(Game):
             ),
         )
 
-    def check_constraints_met(self) -> bool:
+    async def acheck_constraints_met(self) -> bool:
         """
         Check if all constraints are met for a game.
 
@@ -239,16 +268,16 @@ class LocalGame(Game):
             attr = constraint["attribute"]
             min_count = constraint["minCount"]
 
-            actual_count = self.people.filter(
+            actual_count = await self.people.filter(
                 decision=True, **{f"attributes__{attr}": True}
-            ).count()
+            ).acount()
 
             if actual_count < min_count:
                 return False
 
         return True
 
-    def make_decision_and_get_next(
+    async def amake_decision_and_get_next(
         self, person: Person, accept: bool
     ) -> dict[str, Any]:
         """
@@ -264,16 +293,17 @@ class LocalGame(Game):
         """
         # Update person decision
         person.decision = accept
-        person.save(update_fields=["decision"])
+        await person.asave(update_fields=["decision"])
 
         # Check game completion conditions
-        admitted = self.admitted_count
-        rejected = self.rejected_count
+        attribute_and_top_of_house_counts = await self.attribute_and_top_of_house_counts
+        admitted = attribute_and_top_of_house_counts.get("admitted", 0)
+        rejected = attribute_and_top_of_house_counts.get("rejected", 0)
 
         # Check if game should end
         if admitted >= CAPACITY:
             # Check if constraints are met
-            constraints_met = self.check_constraints_met()
+            constraints_met = await self.acheck_constraints_met()
             if constraints_met:
                 self.status = "completed"
                 self.completion_reason = (
@@ -285,7 +315,9 @@ class LocalGame(Game):
                     "Local game failed - Capacity reached without meeting constraints"
                 )
             self.completed_at = timezone.now()
-            self.save(update_fields=["status", "completion_reason", "completed_at"])
+            await self.asave(
+                update_fields=["status", "completion_reason", "completed_at"]
+            )
 
         elif rejected >= REJECTION_LIMIT:
             self.status = "failed"
@@ -293,13 +325,15 @@ class LocalGame(Game):
                 f"Local game failed - Rejection limit reached ({rejected})"
             )
             self.completed_at = timezone.now()
-            self.save(update_fields=["status", "completion_reason", "completed_at"])
+            await self.asave(
+                update_fields=["status", "completion_reason", "completed_at"]
+            )
 
         # Add next person info if game is still running
         if self.status == "running":
             # Generate next person on-demand (like RemoteGame)
             next_person_index = person.person_index + 1
-            self._create_next_person(next_person_index)
+            await self._acreate_next_person(next_person_index)
 
         return cast(dict[str, Any], {"status": self.status})
 

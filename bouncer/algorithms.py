@@ -6,9 +6,10 @@ on people trying to get into the nightclub.
 """
 
 import math
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TextIO
 
+from asgiref.sync import sync_to_async
 from django.core.management.base import CommandError
 from stable_baselines3 import PPO
 
@@ -16,10 +17,10 @@ from bouncer.constants import CAPACITY
 from bouncer.models import Game, Person
 from bouncer.rl.env import ATTRIBUTE_ORDER, build_observation_vector
 
-AlgorithmFunc = Callable[[Person, Game, TextIO, str | None], bool]
+AlgorithmFunc = Callable[[Person, Game, TextIO, str | None], Awaitable[bool]]
 
 
-def too_nice_bouncer(
+async def too_nice_bouncer(
     person: Person, game: Game, stdout: TextIO, model_path: str | None
 ) -> bool:
     """
@@ -35,7 +36,7 @@ def too_nice_bouncer(
     return True
 
 
-def so_mean_bouncer(
+async def so_mean_bouncer(
     person: Person, game: Game, stdout: TextIO, model_path: str | None
 ) -> bool:
     """
@@ -435,7 +436,7 @@ def deficit_weighted_bouncer_s3(
     return False
 
 
-def ppo_bouncer(
+async def ppo_bouncer(
     person: Person, game: Game, stdout: TextIO, model_path: str | None
 ) -> bool:
     """Use a saved Stable-Baselines3 PPO policy to decide."""
@@ -444,22 +445,18 @@ def ppo_bouncer(
     model: PPO = PPO.load(model_path)
 
     # Build observation vector from Game state
-    admitted = int(game.admitted_count)
-    rejected = int(game.rejected_count)
+    attribute_and_top_of_house_counts = await game.attribute_and_top_of_house_counts
+    admitted = attribute_and_top_of_house_counts.pop("admitted", 0)
+    rejected = attribute_and_top_of_house_counts.pop("rejected", 0)
     constraints = {c["attribute"]: int(c["minCount"]) for c in game.constraints}
     min_counts = {a: int(constraints.get(a, 0)) for a in ATTRIBUTE_ORDER}
-    accepted_attr_counts: dict[str, int] = {}
-    for attr in ATTRIBUTE_ORDER:
-        accepted_attr_counts[attr] = game.people.filter(
-            decision=True, **{f"attributes__{attr}": True}
-        ).count()
 
     obs = build_observation_vector(
         scenario=int(game.scenario),
         admitted=admitted,
         rejected=rejected,
         min_counts=min_counts,
-        accepted_attr_counts=accepted_attr_counts,
+        accepted_attr_counts=attribute_and_top_of_house_counts,
         current_attrs=person.attributes,
         capacity=CAPACITY,
     )
@@ -471,13 +468,14 @@ def ppo_bouncer(
 
 
 # Registry of available algorithms
+# There are several that aren't really used anymore so not high priority to async-ify them
 ALGORITHMS: dict[str, AlgorithmFunc] = {
     "too_nice_bouncer": too_nice_bouncer,
     "so_mean_bouncer": so_mean_bouncer,
-    "optimal_markov_bouncer": optimal_markov_bouncer,
-    "two_trait_heuristic_bouncer": two_trait_heuristic_bouncer,
-    "deficit_weighted_bouncer": deficit_weighted_bouncer,
-    "deficit_weighted_bouncer_s3": deficit_weighted_bouncer_s3,
+    "optimal_markov_bouncer": sync_to_async(optimal_markov_bouncer),
+    "two_trait_heuristic_bouncer": sync_to_async(two_trait_heuristic_bouncer),
+    "deficit_weighted_bouncer": sync_to_async(deficit_weighted_bouncer),
+    "deficit_weighted_bouncer_s3": sync_to_async(deficit_weighted_bouncer_s3),
     "ppo_bouncer": ppo_bouncer,
 }
 
