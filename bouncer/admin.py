@@ -2,7 +2,8 @@ from typing import Any
 
 from django.contrib import admin, messages
 from django.contrib.contenttypes.models import ContentType
-from django.db.models import QuerySet
+from django.db.models import QuerySet, TextField
+from django.db.models.functions import Cast
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
@@ -63,9 +64,14 @@ class TagsListFilter(admin.SimpleListFilter):
     ) -> QuerySet[Game]:
         value = self.value()
         if value == "__none__":
-            return queryset.filter(tags=[])
+            # SQLite JSON contains is not supported; compare stringified JSON
+            qs = queryset.annotate(tags_text=Cast("tags", output_field=TextField()))
+            return qs.filter(tags_text="[]")
         if value:
-            return queryset.filter(tags__contains=[value])
+            # Portable substring match against JSON string representation: look for "value"
+            qs = queryset.annotate(tags_text=Cast("tags", output_field=TextField()))
+            needle = f'"{value}"'
+            return qs.filter(tags_text__contains=needle)
         return queryset
 
 
