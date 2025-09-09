@@ -22,6 +22,7 @@ class Game(PolymorphicModel):
         ("running", "Running"),
         ("completed", "Completed"),
         ("failed", "Failed"),
+        ("error", "Error"),
     ]
 
     game_id = models.CharField(max_length=255, unique=True)
@@ -76,6 +77,40 @@ class Game(PolymorphicModel):
     @classmethod
     def start_new_game(cls, scenario: int, **kwargs: Any) -> Game:
         return asyncio.run(cls.astart_new_game(scenario, **kwargs))
+
+    @classmethod
+    def best_by_scenario(cls) -> dict[int, int]:
+        per_game_rows = (
+            cls.objects.filter(status="completed")
+            .values("scenario", "id")
+            .annotate(rej_count=Count("people", filter=Q(people__decision=False)))
+        )
+        best_by_s = dict.fromkeys([1, 2, 3], REJECTION_LIMIT)
+        for row in per_game_rows:
+            scen = int(row.get("scenario") or 0)
+            rej = int(row.get("rej_count") or REJECTION_LIMIT)
+            curr = best_by_s.get(scen) or REJECTION_LIMIT
+            if rej < curr:
+                best_by_s[scen] = rej
+        return best_by_s
+
+    @classmethod
+    def viable_games(cls) -> list[Game]:
+        """Return list of games that are still running and are below current best"""
+        best_by_s = cls.best_by_scenario()
+        in_progress_rows = (
+            cls.objects.filter(status="running")
+            .values("scenario", "id")
+            .annotate(rej_count=Count("people", filter=Q(people__decision=False)))
+        )
+        viable_games = []
+        for row in in_progress_rows:
+            scen = int(row.get("scenario"))
+            rej = int(row.get("rej_count"))
+            curr = best_by_s.get(scen)
+            if curr is None or rej < curr:
+                viable_games.append(row)
+        return viable_games
 
     async def amake_decision_and_get_next(
         self, person: Person, accept: bool

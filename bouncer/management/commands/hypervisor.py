@@ -123,20 +123,8 @@ class Command(BaseCommand):
             )
 
         # Determine current best (lowest rejects) per scenario from completed RemoteGames
-        unique_scenarios = sorted(set(scenario_list))
-        per_game_rows = (
-            RemoteGame.objects.filter(status="completed")
-            .values("scenario", "id")
-            .annotate(rej_count=Count("people", filter=Q(people__decision=False)))
-        )
-        best_by_s = dict.fromkeys(unique_scenarios)
-        for row in per_game_rows:
-            scen = int(row.get("scenario") or 0)
-            rej = int(row.get("rej_count") or REJECTION_LIMIT)
-            curr = best_by_s.get(scen)
-            if curr is None or rej < curr:
-                best_by_s[scen] = rej
-        for s in unique_scenarios:
+        best_by_s = RemoteGame.best_by_scenario()
+        for s in best_by_s.keys():
             self.stdout.write(
                 self.style.MIGRATE_HEADING(
                     f"Scenario {s}: current best rejects = {best_by_s[s] if best_by_s[s] is not None else 'N/A'}"
@@ -232,4 +220,4 @@ class Command(BaseCommand):
             with DelayedKeyboardInterrupt(on_interrupt=on_interrupt):
                 asyncio.run(main())
         except KeyboardInterrupt:
-            self.stdout.write(self.style.WARNING("Hypervisor shutdown."))
+            self.stdout.write(self.style.NOTICE("Hypervisor shutdown."))
