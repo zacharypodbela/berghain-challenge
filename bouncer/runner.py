@@ -154,7 +154,7 @@ async def run_game_until(
 
         except Exception as e:
             log(
-                f"ERROR making decision: {str(e)}\n"
+                f"ERROR making decision: {e or type(e)}\n"
                 f"Stopping algorithm run. You can restart with the same command."
             )
             return

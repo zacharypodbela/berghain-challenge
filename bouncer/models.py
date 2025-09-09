@@ -7,6 +7,7 @@ from django.db import models
 from django.db.models import Count, Q
 from django.utils import timezone
 from django.utils.functional import cached_property
+from httpx import HTTPStatusError
 from polymorphic.models import PolymorphicModel
 
 from bouncer.constants import CAPACITY, REJECTION_LIMIT
@@ -100,7 +101,7 @@ class Game(PolymorphicModel):
         best_by_s = cls.best_by_scenario()
         in_progress_rows = (
             cls.objects.filter(status="running")
-            .values("scenario", "id")
+            .values("scenario", "game_id")
             .annotate(rej_count=Count("people", filter=Q(people__decision=False)))
         )
         viable_games = []
@@ -192,9 +193,17 @@ class RemoteGame(Game):
         self, person: Person, accept: bool
     ) -> dict[str, Any]:
         # Call the API
-        api_data = await remote_api.make_decision_and_get_next(
-            game_id=self.game_id, person_index=person.person_index, accept=accept
-        )
+
+        # If the API error was a 4xx, mark the game with status "error"
+        try:
+            api_data = await remote_api.make_decision_and_get_next(
+                game_id=self.game_id, person_index=person.person_index, accept=accept
+            )
+        except HTTPStatusError as e:
+            if 400 <= e.response.status_code < 500:
+                self.status = "error"
+                await self.asave(update_fields=["status"])
+            raise
 
         # Only update database if API call was successful
         person.decision = accept
