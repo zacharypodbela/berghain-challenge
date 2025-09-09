@@ -137,6 +137,12 @@ class Command(BaseCommand):
         viable_running_games_to_play_while_waiting = (
             RemoteGame.viable_games_by_scenario()
         )
+        for s in viable_running_games_to_play_while_waiting.keys():
+            self.stdout.write(
+                self.style.WARNING(
+                    f"Scenario {s}: {len(viable_running_games_to_play_while_waiting[s])} existing running games with scores lower than current best to play if rate limited"
+                )
+            )
 
         async def run_one_slot(s: int) -> None:
             def stop_condition(rejected_count: int) -> bool:

@@ -104,7 +104,7 @@ class Game(PolymorphicModel):
             .values("scenario", "game_id")
             .annotate(rej_count=Count("people", filter=Q(people__decision=False)))
         )
-        viable_games_by_s = dict.fromkeys([1, 2, 3], [])
+        viable_games_by_s = {key: [] for key in [1, 2, 3]}
         for row in in_progress_rows:
             scen = int(row.get("scenario"))
             rej = int(row.get("rej_count"))
