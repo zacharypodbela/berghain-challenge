@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from datetime import timedelta
 
 from django.utils import timezone
 
 from bouncer.algorithms import AlgorithmFunc
+from bouncer.constants import RATE_LIMIT_N, RATE_LIMIT_TIME
 from bouncer.models import Game, LocalGame, RemoteGame
 
 
@@ -19,10 +19,10 @@ async def wait_for_remote_game_capacity(log: Callable[[str], None]) -> None:
 
     while True:
         now = timezone.now()
-        window_start = now - timedelta(minutes=15, seconds=30)  # Add 30s buffer
+        window_start = now - RATE_LIMIT_TIME
         recent_qs = RemoteGame.objects.filter(created_at__gte=window_start)
         count = await recent_qs.acount()
-        if count < 10:
+        if count < RATE_LIMIT_N:
             return
 
         oldest = await recent_qs.order_by("created_at").afirst()
@@ -30,7 +30,7 @@ async def wait_for_remote_game_capacity(log: Callable[[str], None]) -> None:
             # Defensive: if query returns no row unexpectedly, do not block
             return
 
-        target_time = oldest.created_at + timedelta(minutes=15, seconds=30)
+        target_time = oldest.created_at + RATE_LIMIT_TIME
         wait_seconds = max(1.0, float((target_time - now).total_seconds()))
         log(
             f"Remote game creation limit reached: Sleeping {int(wait_seconds)}s until {target_time.isoformat()}\n"

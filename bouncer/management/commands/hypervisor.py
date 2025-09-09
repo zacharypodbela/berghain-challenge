@@ -4,14 +4,16 @@ import asyncio
 import signal
 import uuid
 from collections.abc import Callable
+from functools import partial
 from types import FrameType, TracebackType
 from typing import Any, Literal, Self, cast
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db.models import Count, Q
+from django.utils import timezone
 
 from bouncer.algorithms import ALGORITHMS, AlgorithmFunc, get_algorithm
-from bouncer.constants import REJECTION_LIMIT
+from bouncer.constants import RATE_LIMIT_N, RATE_LIMIT_TIME, REJECTION_LIMIT
 from bouncer.models import RemoteGame
 from bouncer.runner import run_game_until
 
@@ -132,6 +134,9 @@ class Command(BaseCommand):
             )
 
         should_stop = False
+        viable_running_games_to_play_while_waiting = (
+            RemoteGame.viable_games_by_scenario()
+        )
 
         async def run_one_slot(s: int) -> None:
             def stop_condition(rejected_count: int) -> bool:
@@ -145,15 +150,33 @@ class Command(BaseCommand):
                 for line in msg.splitlines(keepends=True):
                     self.stdout.write(prefix + line)
 
-            await run_game_until(
+            play = partial(
+                run_game_until,
                 algorithm=resolved[s][0],
                 log=log,
-                scenario=s,
-                use_server=True,
                 model_path=resolved[s][1],
                 verbose=verbose,
                 stop_condition=stop_condition,
             )
+
+            # If we're currently at the rate limit, play a older game we never finished w score lower than our best instead
+            recent_count = await RemoteGame.objects.filter(
+                created_at__gte=timezone.now() - RATE_LIMIT_TIME
+            ).acount()
+            viable_running_games = viable_running_games_to_play_while_waiting.get(s, [])
+            if recent_count >= RATE_LIMIT_N and viable_running_games:
+                game_id, _ = viable_running_games.pop(0)
+                log(
+                    f"At rate limit ({recent_count} games in last {RATE_LIMIT_TIME}), playing existing viable game {game_id} instead of starting new."
+                )
+                await play(
+                    game_id=game_id,
+                )
+            else:
+                await play(
+                    scenario=s,
+                    use_server=True,
+                )
 
             # Recompute best after this slot finishes a run
             # Group by game id so we get per-game reject counts and can pick the minimum,
@@ -175,6 +198,26 @@ class Command(BaseCommand):
                             f"New best for scenario {s}: {new_best} rejects (prev={prev})"
                         )
                     )
+
+                    # Remove any games from viable_running_games_to_play_while_waiting that now have too many rejects
+                    viable_running_games = viable_running_games_to_play_while_waiting.get(
+                        s, []
+                    )  # Refresh reference in case other slot modified it while we were playing
+                    for game_id, rej_count in viable_running_games:
+                        count_removed = 0
+                        if rej_count > new_best:
+                            try:
+                                viable_running_games.remove((game_id, rej_count))
+                            except ValueError:
+                                # Super rare race condition where two slots score new best and one tries to remove a game the other already removed
+                                pass
+                            count_removed += 1
+                        if count_removed > 0:
+                            self.stdout.write(
+                                self.style.WARNING(
+                                    f"{count_removed} running games for scenario {s} are no longer viable"
+                                )
+                            )
 
         async def manage_scenario(s: int, slots: int) -> None:
             # Maintain up to `slots` concurrent runners for this scenario

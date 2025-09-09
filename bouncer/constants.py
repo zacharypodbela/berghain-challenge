@@ -3,10 +3,16 @@ Constants for Berghain Challenge scenarios
 These are extracted from actual API responses and are consistent across all games
 """
 
+from datetime import timedelta
 from typing import Any
 
 CAPACITY = 1000  # Max people that can be admitted
 REJECTION_LIMIT = 20000  # Max rejections before game fails
+
+RATE_LIMIT_TIME = timedelta(
+    minutes=15, seconds=30
+)  # 15 minute rolling window + 30s buffer
+RATE_LIMIT_N = 10  # Max 10 RemoteGames per window
 
 SCENARIO_CONFIGS: dict[int, dict[str, Any]] = {
     1: {
