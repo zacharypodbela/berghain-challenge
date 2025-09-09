@@ -187,6 +187,8 @@ class Command(BaseCommand):
             # Recompute best after this slot finishes a run
             # Group by game id so we get per-game reject counts and can pick the minimum,
             # instead of aggregating across the whole scenario.
+            # TODO: Make the RemoteGame.best_by_scenario() method async compatible and use that instead.
+            # TODO: This will also mean making viable_games_by_scenario async compatible, which will allow us to refresh it after failures to be super robust against network issues.
             row = (
                 await RemoteGame.objects.filter(status="completed", scenario=s)
                 .values("scenario", "id")
